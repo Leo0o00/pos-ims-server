@@ -5,11 +5,12 @@ import { CommonModule } from './common/common.module';
 import { ProvidersModule } from './providers/providers.module';
 import { ProductCategoriesModule } from './product_categories/product_categories.module';
 import { ProductsModule } from './products/products.module';
+import { EmployeesModule } from './employees/employees.module';
 
 @Module({
   imports: [ConfigModule.forRoot({
     isGlobal: true,
     cache: true,
-  }),CommonModule, PointOfSalesModule,  ProvidersModule, ProductCategoriesModule, ProductsModule],
+  }),CommonModule, PointOfSalesModule,  ProvidersModule, ProductCategoriesModule, ProductsModule, EmployeesModule],
 })
 export class AppModule {}

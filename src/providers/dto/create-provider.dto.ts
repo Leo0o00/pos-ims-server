@@ -10,7 +10,7 @@ export class CreateProviderDto {
     @MaxLength(45, {
         message: 'The provider name must be at most $constraint1 characters long.'
     })
-    name: string;
+    readonly name: string;
 
     // @IsPhoneNumber(, {
     //     message: 'The phone number must be a valid phone number.'
@@ -27,7 +27,7 @@ export class CreateProviderDto {
     @MaxLength(45, {
         message: 'The phone number must be at most $constraint1 characters long.'
     })
-    phone_number: string;
+    readonly phone_number: string;
 
     @IsString({
         message: 'The email must be a text string.'
@@ -38,5 +38,5 @@ export class CreateProviderDto {
     @MaxLength(100, {
         message: 'Email must not exceed $constraint1 characters.'
     })
-    email: string;
+    readonly email: string;
 }

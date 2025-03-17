@@ -49,13 +49,7 @@ export class ProductsController {
     ) files: Array<Express.Multer.File>,
     @Body() body: BulkCreateProductDto,
   ) {
-    console.log("Request Body:", body.products);
-    console.log("Request Images multer:", files);
-
     return await this.productsService.create(body.products, files);
-
-
-    
   }
 
   @Get()
@@ -108,7 +102,7 @@ export class ProductsController {
     return await this.productsService.update(uuid, productProperties, updateProductDto.deletedImages || [], files);
   }
 
-  @Delete(':id')
+  @Delete()
   async remove(@Body() body: DeleteProductDto) {
     return await this.productsService.remove(body.productsIds);
   }

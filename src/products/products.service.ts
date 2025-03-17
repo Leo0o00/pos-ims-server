@@ -205,11 +205,11 @@ export class ProductsService {
       };
       
     } catch (error) {
-      console.error(error);
       if (error instanceof BadRequestException) {
         throw error;
       }
-      throw new InternalServerErrorException('Unespected error.')
+      console.error(error);
+      throw new InternalServerErrorException('Unespected error.');
     }
 
 
