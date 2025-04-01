@@ -2,7 +2,6 @@ import {
     IsString,
     IsNumber,
     IsNotEmpty,
-    ValidateNested,
     IsPositive,
     Max,
     IsDateString,
@@ -10,7 +9,6 @@ import {
     MinLength,
 } from 'class-validator';
 import { Type } from 'class-transformer'; // Necesario para validar objetos anidados
-import { ProductImageDto } from './product-image.dto';
 
 export class RCreateProductDto {
     @IsString({
@@ -150,10 +148,10 @@ export class RCreateProductDto {
     pos_name: string;
 
     // @IsObject({message: 'Image field must be an object.'})
-    @ValidateNested() // Validates the nested object
+    // @ValidateNested() // Validates the nested object
     // @IsNotEmpty({
     //     message: 'Image field is required.'
     // })
-    @Type(() => ProductImageDto) // Transforms the object to the class ProductImageDto
-    image: ProductImageDto;
+    // @Type(() => ProductImageDto) // Transforms the object to the class ProductImageDto
+    // image: ProductImageDto;
 }

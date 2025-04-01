@@ -9,6 +9,7 @@ import { CommonModule } from '../common/common.module';
 @Module({
   controllers: [ProductsController],
   providers: [ProductsService],
-  imports: [MulterModule.register({storage: memoryStorage()}), PrismaModule, CommonModule],
+  imports: [MulterModule.register({ storage: memoryStorage() }), PrismaModule, CommonModule],
+  exports: [ProductsService]
 })
 export class ProductsModule {}

@@ -100,3 +100,15 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## Lista de Refactorizaciones que tengo que hacer:
+
+- Debo arreglar la paginacion de los metodos ***findAll*** para validar los query parameters con un Dto y asi poder mostrar al usuario un mensaje de error mas claro cuando introduzca un valor indevido
+- Separar las responsabilidades entre los controladores y los servicios en los modulos:
+  - **Point of Sales**
+  - **Products categories**
+  - **Providers**
+  - **Products**
+  - **Employees**
+  > Con esto me refiero a que debo hacer que el controllador sea quien construya el objeto con los mensajes que se le devuelve al usuario.
+- 

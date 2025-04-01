@@ -118,23 +118,22 @@ model Products_sales {
 }
 
 model Purchases {
-  purchases_id            String               @id @default(uuid()) @db.Uuid
-  purchase_date           DateTime
-  total_quantity_products Int
-  total_invested          Decimal              @db.Decimal(10, 2)
-  created_at              DateTime             @default(now())
-  last_update             DateTime             @updatedAt
-  products_purchases      Products_purchases[]
+  purchases_id       String               @id @default(uuid()) @db.Uuid
+  purchase_date      DateTime
+  created_at         DateTime             @default(now())
+  last_update        DateTime             @updatedAt
+  products_purchases Products_purchases[]
 }
 
 model Products_purchases {
-  purchase_id            String    @db.Uuid
-  product_id             String    @db.Uuid
-  pruduct_quantity       Int
-  product_unit_price     Decimal   @db.Decimal(10, 2)
-  product_total_invested Decimal   @db.Decimal(10, 2)
-  products               Products  @relation(fields: [product_id], references: [product_id])
-  purchases              Purchases @relation(fields: [purchase_id], references: [purchases_id])
+  purchase_id        String    @db.Uuid
+  product_id         String    @db.Uuid
+  product_quantity   Int
+  product_unit_price Decimal   @db.Decimal(10, 2)
+  products           Products  @relation(fields: [product_id], references: [product_id])
+  purchases          Purchases @relation(fields: [purchase_id], references: [purchases_id])
+  created_at         DateTime  @default(now())
+  last_update        DateTime  @updatedAt
 
   @@id([purchase_id, product_id])
 }

@@ -22,7 +22,7 @@ import { S3Service } from 'src/common/s3/s3.service';
 import { RUpdateProductDto } from './dto/r-update-product.dto';
 import { DeleteProductDto } from './dto/delete-product.dto';
 
-const MAX_FILE_SIZE = 2 * 1024 * 1024;
+export const MAX_FILE_SIZE = 2 * 1024 * 1024;
 
 @Controller('products')
 export class ProductsController {

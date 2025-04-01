@@ -2,7 +2,7 @@ import { OmitType, PartialType } from "@nestjs/mapped-types";
 import { RCreateProductDto } from "./r-create-product.dto";
 import { IsArray, IsNotEmpty, IsString, IsUUID, ValidateIf } from "class-validator";
 
-export class RUpdateProductDto extends PartialType(OmitType(RCreateProductDto, ['image'] as const) ){
+export class RUpdateProductDto extends PartialType(RCreateProductDto) {
     
     // @IsNotEmpty({
     //     message: 'Product id is required.'
@@ -15,7 +15,7 @@ export class RUpdateProductDto extends PartialType(OmitType(RCreateProductDto, [
     // })
     // product_id: string;
 
-    @ValidateIf(o => o.deletedImages !== undefined)
+    @ValidateIf(o => o.deletedImages !== undefined || o.deletedImages.length !== 0)
     @IsArray({message: 'Deleted images field must be an array of images.'})
     @IsString({
         each: true,
