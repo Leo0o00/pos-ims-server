@@ -21,6 +21,7 @@ import { BulkCreateProductDto } from './dto/bulk-create-product.dto';
 import { S3Service } from 'src/common/s3/s3.service';
 import { RUpdateProductDto } from './dto/r-update-product.dto';
 import { DeleteProductDto } from './dto/delete-product.dto';
+import { QueryParamsDto } from '../common/dto/query-params.dto';
 
 export const MAX_FILE_SIZE = 2 * 1024 * 1024;
 
@@ -32,6 +33,7 @@ export class ProductsController {
     private readonly s3Service: S3Service
   ) {}
 
+  // noinspection TypeScriptValidateTypes
   @Post()
   @UseInterceptors(FilesInterceptor(
     'images',
@@ -53,8 +55,8 @@ export class ProductsController {
   }
 
   @Get()
-  async findAll(@Query('page', ParseIntPipe) page: number, @Query('limit', ParseIntPipe) limit: number) {
-    return await this.productsService.findAll(page, limit);
+  async findAll(@Query() queryParams: QueryParamsDto) {
+    return await this.productsService.findAll(queryParams);
   }
 
   @Get(':uuid')
@@ -65,11 +67,15 @@ export class ProductsController {
     return await this.productsService.findOne(uuid);
   }
 
+  // noinspection TypeScriptValidateTypes
   @Patch(':uuid')
   @UseInterceptors(
     FilesInterceptor(
-      'files',
+      'newProductImages',
       10,
+      {
+        // TODO: Revisar en el repo de busboy las propiedades del objeto limits y asi implementar un limite en las request
+      }
       
     )
   )
@@ -84,22 +90,14 @@ export class ProductsController {
           fileIsRequired: false,
           errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY
         })
-    ) files: Array<Express.Multer.File>) {
+    ) newProductImages: Array<Express.Multer.File>) {
     
-    const productProperties = {
-      branch: updateProductDto.branch,
-        model: updateProductDto.model,
-        description: updateProductDto.description,
-        purchase_price: updateProductDto.purchase_price,
-        stock_quantity: updateProductDto.stock_quantity,
-        amount: updateProductDto.amount,
-        purchase_date: updateProductDto.purchase_date,
-        category_name: updateProductDto.category_name,
-        provider_name: updateProductDto.provider_name,
-        pos_name: updateProductDto.pos_name,
+    // Verifica que el usuario proporciona datos para actualizar
+    if (Object.keys(updateProductDto).length === 0 && newProductImages.length === 0 && (!updateProductDto.deletedImages || updateProductDto.deletedImages.length === 0)) {
+      return 'No data provided for update';
     }
     
-    return await this.productsService.update(uuid, productProperties, updateProductDto.deletedImages || [], files);
+    return await this.productsService.update(uuid, updateProductDto.updatedProductProperties, newProductImages, updateProductDto.deletedImages);
   }
 
   @Delete()
