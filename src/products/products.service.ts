@@ -4,10 +4,13 @@ import { S3Service } from '../common/s3/s3.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaginationService } from '../common/pagination/pagination.service';
 import { EncryptionService } from 'src/common/encryption/encryption.service';
-import * as sharp from 'sharp';
 import { Prisma } from '@prisma/client';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryParamsDto } from '../common/dto/query-params.dto';
+// import { TxClient } from 'src/prisma/types/txclient.type';
+import { mapProductToDto } from './mapper/product.mapper';
+import { MediaService } from 'src/common/media/media.service';
+import { DeletedImagesDto } from './dto/deleted-images.dto';
 
 
 type Source = 'Service' | 'Request';
@@ -37,6 +40,7 @@ type ProductServiceResponseType = RequestFromAntotherServiceResponse | RequestFr
 export class ProductsService {
   constructor(
     private readonly s3Service: S3Service,
+    private readonly media: MediaService,
     private prisma: PrismaService,
     private readonly paginationService: PaginationService,
     private readonly encryptionService: EncryptionService,
@@ -46,7 +50,12 @@ export class ProductsService {
   }
   
   
-  async create(products: RCreateProductDto[], images: Array<Express.Multer.File>, source?: Source): Promise<ProductServiceResponseType> {
+  async create(
+    products: RCreateProductDto[],
+    images: Array<Express.Multer.File>,
+    source: Source = 'Request',
+    // db: TxClient | PrismaService = this.prisma,   // <‑‑ acepta cliente de contexto
+  ): Promise<ProductServiceResponseType> {
     
     // Arreglo para almacenar las claves de archivos subidos a S3 para poder revertir en caso de fallo.
     const s3UploadedFiles: string[] = [];
@@ -60,6 +69,11 @@ export class ProductsService {
     }
     // 1.Prisma Transaction
     try {
+      // TODO: Esto tengo que investigarlo luego
+      // // Si el llamador ya abrió transacción => la reutilizamos
+      // const trx = 'transaction' in db ? await db : (db as TxClient);
+      // return trx.$transaction(async (tx) => {
+
       return this.prisma.$transaction(async (tx) => {
         
         // 2. Create products
@@ -136,27 +150,24 @@ export class ProductsService {
 
         const encryptedFileName = this.encryptionService.encrypt(images[index].originalname);
         const mimeType = images[index].mimetype;
-        const fileSharpened = await sharp(images[index].buffer)
-        .resize({height: 2000, width: 2000, fit: 'inside'})
-        .toBuffer();
         
-        
-        const s3UploadResult = await this.s3Service.uploadFile(
-          fileSharpened,
-          encryptedFileName,
-          mimeType);
-        
+        const s3UploadResult = await this.media.processAndUpload(images[index].buffer, encryptedFileName, mimeType)
+        .catch((err) => {
+          throw new InternalServerErrorException(`Error processing and uploading image for product ${productData.product_id}: ${err.message}`);
+        });
+      
         if (!s3UploadResult) {
           throw new InternalServerErrorException(`Error uploading image for product ${productData.product_id}`
           );
         }
 
-        // Registrar la clave del archivo para un posible rollback.
-        s3UploadedFiles.push(encryptedFileName);
+        // Registrar la clave de los archivos para un posible rollback.
+        s3UploadedFiles.push(s3UploadResult.originalKey);
+        s3UploadedFiles.push(s3UploadResult.thumbKey);
         
         try {
           await tx.products_images.create({
-            data: { id: productData.product_id, image_name: encryptedFileName }
+            data: { id: productData.product_id, image_original_key: s3UploadResult.originalKey, image_thumb_key: s3UploadResult.thumbKey }
           })
         } catch (error) {
           
@@ -165,34 +176,28 @@ export class ProductsService {
           
         }
         // Obtener la URL firmada para la imagen y agregarla al arreglo de respuesta.
-        const imageUrl = await this.s3Service.getObjectSignedUrl(
-          encryptedFileName
+        const thumbUrl = await this.s3Service.getObjectSignedUrl(
+          s3UploadResult.thumbKey
         );
         createdProducts.push({
           productId: productData.product_id,
-          imageUrl,
+          imageUrl: thumbUrl,
         });
-      }    
+        
+      }
+        
       // 3. Return response
       // Si el origen es 'Service', retornar la respuesta con los datos de los productos creados y las claves de S3.
       if (source && source === 'Service') {
         return {
           data: {
             createdProducts,
-            s3UploadedFiles
+            s3UploadedFiles // Esto se retorna para que en el servicio que llama al metodo se pueda hacer un rollback manual de archivos subidos al S3 en caso de error.
 
           }
           
         };
       }
-
-      // // Si el origen es 'Request', retornar la respuesta con los datos de los productos creados y las URLs firmadas de las imágenes.
-      // if (source && source === 'Request') {
-      //   return {
-      //     message: 'Request processed successfully.',
-      //     data: createdProducts,
-      //   };
-      // }
       
       // Si no se especifica el origen, retornar la respuesta con los datos de los productos creados y las URLs firmadas de las imágenes.
       return {
@@ -212,7 +217,8 @@ export class ProductsService {
     // Rollback manual de archivos S3 en caso de error.
     for (const key of s3UploadedFiles) {
       try {
-        await this.s3Service.deleteFile(key);
+        const deleteResponse = await this.s3Service.deleteFile(key);
+        if(!deleteResponse) console.error(`Failed to rollback S3 file ${key}:`)
       } catch (s3Error) {
         console.error(`Failed to rollback S3 file ${key}:`, s3Error);
       }
@@ -245,7 +251,7 @@ export class ProductsService {
       mode: string;
     }
 
-    const { query, limit = 10, page = 1} = queryParams;
+    const { query, limit = 10, page = 1, minStock, minPrice, maxPrice } = queryParams;
     let filters: Array<Record<string, Filters>> = []
     
     if (query) {
@@ -260,36 +266,43 @@ export class ProductsService {
       ]
       
     }
-    const where = query ? { OR: filters } : {};
+    const where: Prisma.ProductsWhereInput = {
+      AND: [
+        query ? { OR: filters } : {},
+        minStock ? { stock_quantity: { gte: minStock } } : {},
+        minPrice ? { purchase_price: { gte: minPrice } } : {},
+        maxPrice ? { purchase_price: { lte: maxPrice } } : {},
 
+      ],
+    };
     try {
-      const result = await this.prisma.products.findMany({
+      
+      const raw = await this.prisma.products.findMany({
         where,
-        include: {
-          img: { 
-            select: {
-              image_name: true
-            },
-            take: 1
-          }
+        select: {
+          product_id: true,
+          branch: true,
+          model: true,
+          description: true,
+          purchase_price: true,
+          stock_quantity: true,
+          amount: true,
+          purchase_date: true,
+          category_name: true,
+          provider_name: true,
+          pos_name: true,
+          created_at: true,
+          last_update: true,
+          img: true,
         },
-        orderBy: {
-          created_at: 'desc'
-        },
-        skip: (page - 1) * limit,
+        orderBy: { created_at:'desc' },
+        skip: ( page-1 ) * limit,
         take: limit,
       });
 
-      for (const product of result) {
-        
-        if (product.img.length > 0) {
-          const imageUrl = await this.s3Service.getObjectSignedUrl(product.img[0].image_name);
-          product.img[0].image_name = imageUrl;
-        }
+      const result = await Promise.all(raw.map(p => mapProductToDto(p, this.s3Service)));
 
-      }
-
-      const total = query ? result.length : await this.prisma.products.count();
+      const total = await this.prisma.products.count({where});
       const meta = this.paginationService.getPaginationMeta(page, limit, total);
       
       
@@ -308,6 +321,22 @@ export class ProductsService {
   async findOne(uuid: string) {
     try {
       const product = await this.prisma.products.findFirst({
+        select: {
+          product_id: true,
+          branch: true,
+          model: true,
+          description: true,
+          purchase_price: true,
+          stock_quantity: true,
+          amount: true,
+          purchase_date: true,
+          category_name: true,
+          provider_name: true,
+          pos_name: true,
+          created_at: true,
+          last_update: true,
+          img: true
+        },
         where: {
           product_id: uuid
         },
@@ -315,26 +344,16 @@ export class ProductsService {
       
       
       if(!product) {
-        throw new BadRequestException('Product not found with the provided id.')
+        throw new NotFoundException('Product not found with the provided id.')
       }
-
-      const images = await this.prisma.products_images.findMany({
-        where: {
-          id: product.product_id
-        },
-        // select: {
-        //   image_name: true
-        // }
-      })
-      console.log(images);
       
-      const imagesUrls: {imageName: string, url: string}[] = [];
+      const imagesUrls: Array<{imageOriginalSizeName: string, imageOriginalSizelUrl: string}> = [];
       
       
-      if (images.length > 0) {
-        for (const img of images) {
-          const url = await this.s3Service.getObjectSignedUrl(img.image_name);
-          imagesUrls.push({imageName: img.image_name, url});
+      if (product.img.length > 0) {
+        for (const img of product.img) {
+          const imageOriginalSizelUrl = await this.s3Service.getObjectSignedUrl(img.image_original_key);
+          imagesUrls.push({imageOriginalSizeName: img.image_original_key, imageOriginalSizelUrl});
         }
       }
 
@@ -356,7 +375,7 @@ export class ProductsService {
       };
       
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof NotFoundException) {
         throw error;
       }
       console.error(error);
@@ -366,8 +385,10 @@ export class ProductsService {
 
   }
 
-  async update(uuid: string, updateProductDto?: UpdateProductDto, files?: Array<Express.Multer.File>, deletedImages?: string[]) {
-    
+  async update(uuid: string, updateProductDto?: UpdateProductDto, files?: Array<Express.Multer.File>, deletedImages?: DeletedImagesDto[]) {
+    const uploadedFiles: string[] = [];
+
+
     try {
       // Verifica que el usuario proporciona un uuid de un producto existente en BD
       const existingProduct = await this.prisma.products.findFirst({
@@ -377,7 +398,7 @@ export class ProductsService {
       })
 
       if(!existingProduct) {
-        throw new BadRequestException(`Product with id ${uuid} not found.`);
+        throw new NotFoundException(`Product with id ${uuid} not found.`);
         
       }
     
@@ -422,7 +443,7 @@ export class ProductsService {
                           id: uuid,
                         },
                         {
-                          image_name: imageName
+                          image_original_key: imageName.imageOriginalSizeName
                         }
                       ]
                     }
@@ -430,7 +451,7 @@ export class ProductsService {
                   if (imagesEliminated.count === 0) {
                     throw new InternalServerErrorException('Error while deleting images from database. Check the logs.');
                   }
-                  const S3DeleteResponse = await this.s3Service.deleteFile(imageName);
+                  const S3DeleteResponse = await this.s3Service.deleteFile(imageName.imageOriginalSizeName);
                   console.log('Respuesta del comando de eliminar foto del S3: ', S3DeleteResponse);
                   if (!S3DeleteResponse) {
                     throw new InternalServerErrorException(`Error while deleting image from S3 Service: "${imageName}".`);
@@ -459,11 +480,11 @@ export class ProductsService {
               files.map(async (file) => {
                 const encryptedFileName = this.encryptionService.encrypt(file.originalname);
                 const mimeType = file.mimetype;
-                const fileSharpened = await sharp(file.buffer)
-                .resize({ height: 2000, width: 2000, fit: 'inside' })
-                .toBuffer();
+                const s3UploadResult = await this.media.processAndUpload(file.buffer, encryptedFileName, mimeType)
+                .catch((err) => {
+                  throw new InternalServerErrorException(`Error processing and uploading image for product ${existingProduct.product_id}: ${err.message}`);
+                });
                 
-                const s3UploadResult = await this.s3Service.uploadFile(fileSharpened, encryptedFileName, mimeType);
                 if (!s3UploadResult) {
                   throw new InternalServerErrorException('Error while uploading product image to S3 Service.');
                 };
@@ -471,11 +492,16 @@ export class ProductsService {
                 await tx.products_images.create({
                   data: {
                     id: uuid,
-                    image_name: encryptedFileName,
+                    image_original_key: s3UploadResult.originalKey,
+                    image_thumb_key: s3UploadResult.thumbKey
                   }
                 });
+
+                uploadedFiles.push(s3UploadResult.originalKey);
+                uploadedFiles.push(s3UploadResult.thumbKey);
                 
               })
+                
             )
             
           } catch (error) {
@@ -500,15 +526,27 @@ export class ProductsService {
         }
       )
       
-        } catch (error) {
-        console.error('Transaction failed:', error);
-        throw new InternalServerErrorException('Database transaction failed');
-      }
-      
-  
-    }
-        
+    } catch (error) {
 
+      if (error instanceof NotFoundException) throw error;
+
+      console.error('Error while updating product. Transaction failed:', error);
+      // Rollback manual de archivos S3 en caso de error.
+      for (const key of uploadedFiles) {
+        try {
+          const deleteResponse = await this.s3Service.deleteFile(key);
+          if(!deleteResponse) console.error(`Failed to rollback S3 file ${key}:`)
+          } catch (s3Error) {
+        console.error(`Failed to rollback S3 file ${key}:`, s3Error);
+      }
+    }
+    throw new InternalServerErrorException('Database transaction failed');
+  }
+  
+}
+  
+  
+  
   async remove(uuid: string[]) {
     try {
       
@@ -520,40 +558,43 @@ export class ProductsService {
               where: {
                 product_id: id,
               },
+              include: {
+                img: true
+              }
             });
 
             if (!existingProduct) {
               throw new NotFoundException(`Product not found with the provided id: ${id}.`);
             }
 
-            const images = await tx.products_images.findMany({
-              where: {
-                id: id,
-              },
-            });
 
-            if (images.length > 0) {
+            if (existingProduct.img.length > 0) {
               await Promise.all(
-                images.map(async (image) => {
-                  const S3DeleteResponse = await this.s3Service.deleteFile(image.image_name);
-                  if (!S3DeleteResponse) {
-                    throw new InternalServerErrorException(`Error while deleting image from S3 Service: "${image.image_name}".`);
+                existingProduct.img.map(async (image) => {
+                  const S3DeleteOriginalResponse = await this.s3Service.deleteFile(image.image_original_key);
+                  const S3DeleteThumbResponse = await this.s3Service.deleteFile(image.image_thumb_key);
+                  if (!S3DeleteOriginalResponse) {
+                    throw new InternalServerErrorException(`Error while deleting original size image from S3 Service: "${image.image_original_key}".`);
+                  }
+                  if (!S3DeleteThumbResponse) {
+                    throw new InternalServerErrorException(`Error while deleting thumb size image from S3 Service: "${image.image_thumb_key}".`);
                   }
                 })
               );
             }
-
-            // await tx.products_images.deleteMany({
-            //   where: {
-            //     id: id,
-            //   },
-            // });
-
-            await tx.products.delete({
-              where: {
-                product_id: id,
-              },
-            });
+            try {
+              await tx.products.delete({
+                where: {
+                  product_id: id,
+                },
+              });
+              
+            } catch (error) {
+              if (error.code === 'P2003') {
+                throw new BadRequestException(`The product '${id}' cannot be eliminated because there is another entity associated with it.`);
+              }
+              
+            }
           })
         );
 
@@ -574,6 +615,9 @@ export class ProductsService {
         throw error;
       }
       if (error instanceof InternalServerErrorException) { 
+        throw error;
+      }
+      if (error instanceof BadRequestException) {
         throw error;
       }
       

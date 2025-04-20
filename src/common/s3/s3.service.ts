@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -18,7 +18,7 @@ export class S3Service {
   
   
   constructor(
-    private configService: ConfigService,
+    @Inject(ConfigService) private readonly configService: ConfigService,
   ) {
     this.bucketName = this.configService.get<string>('AWS_BUCKET_NAME');
     this.bucketRegion = this.configService.get<string>('AWS_BUCKET_REGION')
@@ -78,12 +78,19 @@ export class S3Service {
     
   }
   
-  async deleteFile(fileName) {
+  async deleteFile(fileName: string) {
     const deleteParams = {
       Bucket: this.bucketName,
       Key: fileName,
     }
 
+    // TODO: Comprobar cual es la verdadera estructura de la respuesta del comando delete
+    // { // DeleteObjectOutput
+    //   DeleteMarker: true || false,
+    //   VersionId: "STRING_VALUE",
+    //   RequestCharged: "requester",
+    // }
+    
     const deleteResponse: {
       '$metadata': {
         httpStatusCode: number,
@@ -94,6 +101,8 @@ export class S3Service {
         totalRetryDelay: number
       }
     } = await this.s3Client.send(new DeleteObjectCommand(deleteParams));
+    console.log("DELETE RESPONSE: ",deleteResponse);
+
 
     if (deleteResponse.$metadata.httpStatusCode === 204) return true;
     return false;

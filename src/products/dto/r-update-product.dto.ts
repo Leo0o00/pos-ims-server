@@ -1,6 +1,7 @@
-import { IsArray, IsOptional, IsString, ValidateIf, ValidateNested } from "class-validator";
+import { IsArray, IsOptional, ValidateIf, ValidateNested } from "class-validator";
 import { UpdateProductDto } from "./update-product.dto";
 import { Type } from "class-transformer";
+import { DeletedImagesDto } from "./deleted-images.dto";
 
 export class RUpdateProductDto{
     
@@ -17,17 +18,15 @@ export class RUpdateProductDto{
 
     @IsOptional()
     @ValidateNested({
-        message: 'Invalid Existing Products object.'
+        message: 'Invalid Existing Product object.'
     })
     @Type(() => UpdateProductDto)
     updatedProductProperties?: UpdateProductDto;
 
     @IsOptional()
-    @ValidateIf(o => o.deletedImages || o.deletedImages.length > 0)
-    @IsArray({ message: 'Deleted images field must be an array of images.' })
-    @IsString({
-        each: true,
-        message: 'Each deleted images name must be a text string.'
-    })
-    deletedImages?: string[];
+    @Type(() => DeletedImagesDto)
+    @ValidateIf(o => o.deletedImages != undefined && o.deletedImages.length > 0)
+    @ValidateNested({each: true })
+    @IsArray({ message: 'Deleted images field must be an array.' })
+    deletedImages?: DeletedImagesDto[];
 }

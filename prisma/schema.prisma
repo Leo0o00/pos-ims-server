@@ -61,9 +61,12 @@ model Products {
 }
 
 model Products_images {
-  id         String   @db.Uuid
-  image_name String   @unique
-  product    Products @relation(fields: [id], references: [product_id], onDelete: Cascade)
+  id                 String   @db.Uuid
+  image_original_key String   @unique @db.VarChar
+  image_thumb_key    String   @unique @db.VarChar
+  created_at         DateTime @default(now())
+  last_update        DateTime @default(now()) @updatedAt
+  product            Products @relation(fields: [id], references: [product_id], onDelete: Cascade)
 }
 
 model Employees {

@@ -6,7 +6,6 @@ import {
   HttpStatus,
   Param,
   ParseFilePipeBuilder,
-  ParseIntPipe,
   ParseUUIDPipe,
   Patch,
   Post,
@@ -14,7 +13,6 @@ import {
   UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
-import { Express } from 'express';
 import { ProductsService } from './products.service';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { BulkCreateProductDto } from './dto/bulk-create-product.dto';

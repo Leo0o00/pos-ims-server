@@ -111,15 +111,19 @@ export class PurchasesService {
               }
               // Comparar fechas: actualizar purchase_date y purchase_price si la nueva fecha es posterior.
               const newPurchaseDate = new Date(createPurchaseDto.purchase_date);
-              let updateData: Record<string, any> = {
+              const stock_quantity = product.stock_quantity += existingProductDto.stock_quantity
+              let updateData: Record<string, string | number> = {
                 // Incrementar stock.
-                stock_quantity: product.stock_quantity += existingProductDto.stock_quantity,
+                stock_quantity,
+                // Actualizar amount.
+                amount: Number(product.purchase_price) * stock_quantity,
               };
               if (newPurchaseDate > product.purchase_date) {
                 updateData = {
                   ...updateData,
-                  purchase_date: newPurchaseDate,
+                  purchase_date: newPurchaseDate.toISOString(),
                   purchase_price: existingProductDto.purchase_price,
+                  amount: Number(existingProductDto.purchase_price) * stock_quantity
                 };
               }
               // await tx.products.update({
@@ -153,23 +157,25 @@ export class PurchasesService {
           ) {
             
             for (let i = 0; i < createPurchaseDto.newProducts.length; i++) {
+              // Este array es para almacenar el producto a crear y pasarselo a metodo create de productService que solo admite arrays de tipo Product.
               const newProductDto: Array<RCreateProductDto> = [];
 
-              const productData = createPurchaseDto.newProducts[i];
-              const updateData = {
-                branch: productData.branch,
-                model: productData.model,
-                description: productData.description,
-                purchase_price: productData.purchase_price,
-                stock_quantity: productData.stock_quantity,
-                amount: productData.purchase_price * productData.stock_quantity,
+              const newProduct = createPurchaseDto.newProducts[i];
+              const newProductData = {
+                branch: newProduct.branch,
+                model: newProduct.model,
+                description: newProduct.description,
+                purchase_price: newProduct.purchase_price,
+                stock_quantity: newProduct.stock_quantity,
+                amount: newProduct.purchase_price * newProduct.stock_quantity,
                 purchase_date: createPurchaseDto.purchase_date,
-                category_name: productData.category_name,
-                provider_name: productData.provider_name,
-                pos_name: productData.pos_name
+                category_name: newProduct.category_name,
+                provider_name: newProduct.provider_name,
+                pos_name: newProduct.pos_name
               };
 
-              newProductDto.push(updateData);  
+              
+              newProductDto.push(newProductData);  
               
 
               const createProductResponse = await this.productsService.create(newProductDto, files, 'Service');
@@ -186,8 +192,8 @@ export class PurchasesService {
                 data: {
                   purchase_id: purchaseRecord.purchases_id,
                   product_id: createdProductsResult[0].productId,
-                  product_quantity: updateData.stock_quantity,
-                  product_unit_price: updateData.purchase_price,
+                  product_quantity: newProductData.stock_quantity,
+                  product_unit_price: newProductData.purchase_price,
                 },
               });
             }
@@ -210,7 +216,8 @@ export class PurchasesService {
       // Rollback manual de archivos S3 en caso de error.
       for (const key of s3UploadedFiles) {
         try {
-          await this.s3Service.deleteFile(key);
+          const deleteResponse = await this.s3Service.deleteFile(key);
+          if(!deleteResponse) console.error(`Failed to rollback S3 file ${key}:`)
         } catch (s3Error) {
           console.error(`Failed to rollback S3 file ${key}:`, s3Error);
         }
@@ -292,7 +299,7 @@ export class PurchasesService {
       throw new InternalServerErrorException('Unespected error. Check the logs')
     }
     
-    const total = query ? result.length : await this.prisma.purchases.count();
+    const total = await this.prisma.purchases.count();
     const meta = this.paginationService.getPaginationMeta(page, limit, total);
     
     
@@ -327,7 +334,7 @@ export class PurchasesService {
                   pos_name: true,
                   img: {
                     select: {
-                      image_name: true
+                      image_thumb_key: true
                     },
                     take: 1
                   }
@@ -373,7 +380,7 @@ export class PurchasesService {
           
           let url: string = '';
           if (element.products.img.length > 0) {
-            url = await this.s3Service.getObjectSignedUrl(element.products.img[0].image_name);
+            url = await this.s3Service.getObjectSignedUrl(element.products.img[0].image_thumb_key);
             o["imageUrl"] = url;  
           }
     
