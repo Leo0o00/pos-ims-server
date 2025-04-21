@@ -55,13 +55,23 @@ export class PurchasesController {
     return this.purchasesService.findOne(uuid);
   }
 
-  @Patch(':id')
-  async update(@Param('id') id: string, @Body() updatePurchaseDto: UpdatePurchaseDto) {
-    return this.purchasesService.update(+id, updatePurchaseDto);
+  /**
+   * Modifica parcialmente un registro de compra:
+   *  • Cambiar fecha
+   *  • Ajustar cantidades / precios de productos existentes
+   *  • Eliminar productos de la compra
+   */
+  @Patch(':uuid')
+  async update(
+    @Param('uuid', ParseUUIDPipe) uuid: string,
+    @Body() updatePurchaseDto: UpdatePurchaseDto,
+  ) {
+    return this.purchasesService.update(uuid, updatePurchaseDto);
   }
 
-  @Delete(':id')
-  async remove(@Param('id') id: string) {
-    return this.purchasesService.remove(+id);
+  /** Elimina la compra y revierte el stock de los productos asociados */
+  @Delete(':uuid')
+  async remove(@Param('uuid', ParseUUIDPipe) uuid: string) {
+    return this.purchasesService.remove(uuid);
   }
 }

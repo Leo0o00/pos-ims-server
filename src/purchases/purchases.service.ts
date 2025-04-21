@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -11,6 +11,7 @@ import { QueryParamsDto } from 'src/common/dto/query-params.dto';
 import { PurchasesResult } from './types/purchase-result.type';
 import { PaginationService } from 'src/common/pagination/pagination.service';
 import { ProductsPurchased } from './types/products-purchased.type';
+import { TxClient } from 'src/prisma/types/txclient.type';
 
 
 
@@ -21,15 +22,19 @@ import { ProductsPurchased } from './types/products-purchased.type';
  */
 @Injectable()
 export class PurchasesService {
+  
+  private readonly logger = new Logger(PurchasesService.name)
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryptionService: EncryptionService,
     private readonly s3Service: S3Service,
     private readonly productsService: ProductsService,
-    private readonly paginationService: PaginationService
+    private readonly paginationService: PaginationService,
   ){}
+
   
+  // ---------- CREATE ----------
   /**
    * Crea un registro de compra y procesa productos existentes y delega al metodo create de la clase ProductService el procesamiento de los nuevos.
    * Ejecuta todas las operaciones en una transacción Prisma.
@@ -243,6 +248,8 @@ export class PurchasesService {
     }
   }
 
+  
+  // ---------- FINDALL ----------
   async findAll(queryParams: QueryParamsDto) {
     
 
@@ -310,9 +317,9 @@ export class PurchasesService {
     };
   }
 
+  
+  // ---------- FINDONE ----------
   async findOne(uuid: string) {
-
-    
     try {
       const products_purchased: Array<ProductsPurchased> = [];
       
@@ -347,7 +354,7 @@ export class PurchasesService {
       });
 
       if (!purchase) {
-        throw new BadRequestException('Purchase not found with the provided id.')
+        throw new NotFoundException('Purchase not found with the provided id.')
       }
       
       try {
@@ -404,7 +411,7 @@ export class PurchasesService {
       };
       
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof NotFoundException) {
         throw error;
       }
       console.error(`ERROR AL TRAER  DE BD EL DETALLE DE LA COMPRA CON EL ID "${uuid}": `, error);
@@ -413,12 +420,246 @@ export class PurchasesService {
 
 
   }
+  // ---------- UPDATE ----------
+  async update(
+    uuid: string,
+    dto: UpdatePurchaseDto
+  ): Promise<{ message: string, purchase_id: string }> {
 
-  async update(id: number, updatePurchaseDto: UpdatePurchaseDto) {
-    return `This action updates a #${id} purchase`;
+    try {
+
+        return this.prisma.$transaction(async (tx) => {
+        // 1) Verificar existencia
+        const purchase = await tx.purchases.findUnique({
+          where: { purchases_id: uuid },
+          include: { products_purchases: true },
+        });
+        if (!purchase) {
+          throw new NotFoundException(`Purchase ${uuid} not found.`);
+        }
+        
+        /* 2) Posible cambio de fecha de la compra */
+        const newPurchaseDate = dto.purchase_date
+          ? new Date(dto.purchase_date)
+          : undefined;
+        if (newPurchaseDate) {
+          await tx.purchases.update({
+            where: { purchases_id: uuid },
+            data: { purchase_date: newPurchaseDate },
+          });
+        }
+
+        // 3) Actualizar productos existentes
+        if (dto.updatedProducts?.length) {
+          for (const p of dto.updatedProducts) {
+            const relation = purchase.products_purchases.find(
+              (r) => r.product_id === p.product_id,
+            );
+            if (!relation) {
+              throw new BadRequestException(
+                `Product ${p.product_id} is not part of purchase ${uuid}.`,
+              );
+            }
+
+            // diferencia de cantidad para ajustar stock
+            const deltaQty =
+              (p.product_quantity ?? relation.product_quantity) -
+              relation.product_quantity;
+
+            await this._applyStockDelta(
+              tx,
+              p.product_id,
+              deltaQty,
+            );
+
+            const updatedRelation = await tx.products_purchases.update({
+              where: {
+                purchase_id_product_id: {
+                  purchase_id: uuid,
+                  product_id: p.product_id,
+                },
+              },
+              data: {
+                product_quantity: p.product_quantity,
+                product_unit_price: p.product_unit_price,
+              },
+            });
+
+            /* Sincronizar meta del producto (fecha, precio, amount) */
+            if (newPurchaseDate) {
+              await this._syncProductMeta(
+                tx,
+                p.product_id,
+                newPurchaseDate,
+                p.product_unit_price ?? Number(updatedRelation.product_unit_price),
+              );
+            }
+          }
+        }
+
+        // 4) Eliminar productos de la compra
+        if (dto.deletedProducts?.length) {
+          for (const d of dto.deletedProducts) {
+            await this._applyStockDelta(tx,
+              d.product_id,
+              -d.product_quantity);
+
+            await tx.products_purchases.delete({
+              where: {
+                purchase_id_product_id: {
+                  purchase_id: uuid,
+                  product_id: d.product_id,
+                },
+              },
+            });
+          }
+        }
+
+
+        /* 5) Si sólo cambió la fecha, sincronizar el resto de productos no tocados */
+        if (newPurchaseDate) {
+          for (const rel of purchase.products_purchases) {
+            /* Evitar repetir los que ya ajustamos arriba */
+            const alreadyUpdated =
+              dto.updatedProducts?.some((u) => u.product_id === rel.product_id) ??
+              false;
+            const deleted =
+              dto.deletedProducts?.some((x) => x.product_id === rel.product_id) ??
+              false;
+            if (!alreadyUpdated && !deleted) {
+              await this._syncProductMeta(
+                tx,
+                rel.product_id,
+                newPurchaseDate,
+                Number(rel.product_unit_price),
+              );
+            }
+          }
+        }
+
+        this.logger.log(`Purchase ${uuid} updated`);
+        return { message: 'Purchase updated successfully.', purchase_id: uuid };
+      })
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      
+      console.error(error);
+      throw new InternalServerErrorException(`Unexpeted error while updating the purchase detail with id:'${uuid}'.`);
+    }
+
+    
+    
   }
 
-  async remove(id: number) {
-    return `This action removes a #${id} purchase`;
+  // ---------- DELETE ----------
+  async remove(uuid: string) {
+
+    try {
+      return this.prisma.$transaction(async (tx) => {
+        const purchase = await tx.purchases.findUnique({
+          where: { purchases_id: uuid },
+          include: { products_purchases: true },
+        });
+        if (!purchase) {
+          throw new NotFoundException(`Purchase ${uuid} not found.`);
+        }
+
+        // revertir stocks
+        for (const rel of purchase.products_purchases) {
+          await this._applyStockDelta(tx, rel.product_id, -rel.product_quantity);
+        }
+
+        // eliminar relaciones y compra
+        await tx.products_purchases.deleteMany({
+          where: { purchase_id: uuid },
+        });
+        await tx.purchases.delete({ where: { purchases_id: uuid } });
+
+        this.logger.warn(`Purchase ${uuid} deleted`);
+        return { message: 'Purchase deleted successfully.' };
+      });
+    } catch (error) {
+      
+      if (error instanceof NotFoundException) throw error;
+      
+      console.error(error);
+      throw new InternalServerErrorException(`Unexpeted error while deleting the purchase with id:'${uuid}'.`);
+    }
+
+    
   }
+
+  /**
+   * Ajusta el stock del producto asegurando que nunca sea negativo y actualiza el campo amount del producto con la nueva cantidad.
+   */
+  private async _applyStockDelta(
+    tx: TxClient,
+    productId: string,
+    delta: number,
+  ) {
+    const product = await tx.products.findUnique({
+      where: { product_id: productId },
+      select: { stock_quantity: true, purchase_price: true },
+    });
+    if (!product) throw new NotFoundException(`Product ${productId} not found`);
+
+    const newQty = product.stock_quantity + delta;
+    if (newQty < 0) {
+      throw new BadRequestException(
+        `Insufficient stock to apply delta ${delta} on product ${productId}.`,
+      );
+    }
+    await tx.products.update({
+      where: { product_id: productId },
+      data: {
+        stock_quantity: newQty,
+        amount: newQty * Number(product.purchase_price),
+      },
+    });
+  }
+  
+  /**
+   * Sincroniza fecha de compra, precio y amount del producto cuando la nueva
+   * fecha es más reciente que la que posee el propio producto.
+   *
+   * @param tx          Cliente transaccional
+   * @param productId   Id del producto
+   * @param newDate     Nueva fecha de compra de la Purchase
+   * @param unitPrice   Precio unitario registrado en products_purchases (posible valor actualizado)
+  */
+ private async _syncProductMeta(
+   tx: TxClient,
+   productId: string,
+   newDate: Date,
+   unitPrice: number,
+  ) {
+    const prod = await tx.products.findUnique({
+      where: { product_id: productId },
+      select: {
+        purchase_date: true,
+        purchase_price: true,
+        stock_quantity: true,
+      },
+    });
+    
+    /* Solo actualizamos si la nueva fecha es posterior */
+    if (prod && newDate > prod.purchase_date) {
+      const newAmount = new Prisma.Decimal(prod.stock_quantity)
+        .mul(new Prisma.Decimal(unitPrice),
+      );
+      
+      await tx.products.update({
+        where: { product_id: productId },
+        data: {
+          purchase_date: newDate,
+          purchase_price: new Prisma.Decimal(unitPrice),
+          amount: newAmount,
+        },
+      });
+      this.logger.debug(
+        `Producto ${productId} actualizado → fecha:${newDate.toISOString()} price:${unitPrice}`,
+      );
+    }
+  }
+  
 }
