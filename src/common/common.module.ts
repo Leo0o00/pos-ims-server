@@ -3,9 +3,22 @@ import { PaginationService } from './pagination/pagination.service';
 import { S3Service } from './s3/s3.service';
 import { EncryptionService } from './encryption/encryption.service';
 import { MediaService } from './media/media.service';
+import { InventoryHelpers } from './helpers/inventory.helpers';
 
 @Module({
-  providers: [PaginationService, S3Service, EncryptionService, MediaService],
-  exports: [PaginationService, S3Service, EncryptionService, MediaService],
+  providers: [
+    PaginationService,
+    S3Service,
+    EncryptionService,
+    MediaService,
+    InventoryHelpers,
+  ],
+  exports: [
+    PaginationService,
+    S3Service,
+    EncryptionService,
+    MediaService,
+    InventoryHelpers,
+  ],
 })
 export class CommonModule {}

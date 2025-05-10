@@ -1,14 +1,28 @@
-import { PartialType } from '@nestjs/mapped-types';
-import { CreatePurchaseDto } from './create-purchase.dto';
 import { Type } from 'class-transformer';
-import { IsString, IsOptional, IsPositive, IsNumber, IsDateString, IsArray, ValidateNested } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsPositive,
+  IsNumber,
+  IsDateString,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
 
 // export class UpdatePurchaseDto extends PartialType(CreatePurchaseDto) { }
 
 class UpdatedExistingProductDto {
   @IsString() product_id!: string;
-  @IsOptional() @IsPositive() @IsNumber() @Type(() => Number) product_quantity?: number;
-  @IsOptional() @IsPositive() @IsNumber() @Type(() => Number) product_unit_price?: number;
+  @IsOptional()
+  @IsPositive()
+  @IsNumber()
+  @Type(() => Number)
+  product_quantity?: number;
+  @IsOptional()
+  @IsPositive()
+  @IsNumber()
+  @Type(() => Number)
+  product_unit_price?: number;
 }
 
 class DeletedProductDto {
@@ -19,11 +33,15 @@ class DeletedProductDto {
 export class UpdatePurchaseDto {
   @IsOptional() @IsDateString() purchase_date?: string;
 
-  @IsOptional() @IsArray() @ValidateNested({ each: true })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
   @Type(() => UpdatedExistingProductDto)
   updatedProducts?: UpdatedExistingProductDto[];
 
-  @IsOptional() @IsArray() @ValidateNested({ each: true })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
   @Type(() => DeletedProductDto)
   deletedProducts?: DeletedProductDto[];
 }

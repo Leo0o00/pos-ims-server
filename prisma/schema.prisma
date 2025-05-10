@@ -1,5 +1,6 @@
 generator client {
   provider        = "prisma-client-js"
+  // output   = "src/prisma/generated/client"
   previewFeatures = ["typedSql"]
 }
 
@@ -98,24 +99,29 @@ model Salary {
 model Sales {
   sales_id       String           @id @default(uuid()) @db.Uuid
   employee_cid   String
-  quantity       Int
   date           DateTime         @db.Date
-  total_amount   Decimal          @db.Decimal(10, 2)
+  total_amount   Decimal          @db.Decimal(14, 2) @default(0)
   created_at     DateTime         @default(now())
   last_update    DateTime         @updatedAt
+  deleted_at      DateTime?         @db.Timestamp(6)
+
   products_sales Products_sales[]
   employee       Employees        @relation(fields: [employee_cid], references: [CID])
+
+  @@index([employee_cid])
 }
 
 model Products_sales {
   sale_id          String   @db.Uuid
   product_id       String   @db.Uuid
   quantity         Int
-  total_price      Decimal  @db.Decimal(10, 2)
   unit_price       Decimal  @db.Decimal(10, 2)
-  discount_percent Int?     @default(0)
+  total_price      Decimal  @db.Decimal(14, 2)
+  // discount_percent Int?     @default(0)
   product          Products @relation(fields: [product_id], references: [product_id])
   sale             Sales    @relation(fields: [sale_id], references: [sales_id])
+  created_at DateTime @default(now())
+  last_update        DateTime             @updatedAt
 
   @@id([sale_id, product_id])
 }

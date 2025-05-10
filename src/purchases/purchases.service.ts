@@ -1,9 +1,14 @@
-import { BadRequestException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { Prisma } from '@prisma/client';
-import { EncryptionService } from 'src/common/encryption/encryption.service';
 import { S3Service } from 'src/common/s3/s3.service';
 import { ProductsService } from 'src/products/products.service';
 import { RCreateProductDto } from 'src/products/dto/r-create-product.dto';
@@ -11,9 +16,7 @@ import { QueryParamsDto } from 'src/common/dto/query-params.dto';
 import { PurchasesResult } from './types/purchase-result.type';
 import { PaginationService } from 'src/common/pagination/pagination.service';
 import { ProductsPurchased } from './types/products-purchased.type';
-import { TxClient } from 'src/prisma/types/txclient.type';
-
-
+import { InventoryHelpers } from 'src/common/helpers/inventory.helpers';
 
 /**
  * Servicio que gestiona las operaciones de compra de inventario de forma atómica.
@@ -22,18 +25,16 @@ import { TxClient } from 'src/prisma/types/txclient.type';
  */
 @Injectable()
 export class PurchasesService {
-  
-  private readonly logger = new Logger(PurchasesService.name)
+  private readonly logger = new Logger(PurchasesService.name);
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly encryptionService: EncryptionService,
     private readonly s3Service: S3Service,
     private readonly productsService: ProductsService,
     private readonly paginationService: PaginationService,
-  ){}
+    private readonly inventoryHelpers: InventoryHelpers,
+  ) {}
 
-  
   // ---------- CREATE ----------
   /**
    * Crea un registro de compra y procesa productos existentes y delega al metodo create de la clase ProductService el procesamiento de los nuevos.
@@ -43,7 +44,7 @@ export class PurchasesService {
    * @param createPurchaseDto Objeto DTO con los datos de la compra.
    * @param files Arreglo de archivos que corresponde 1:1 con newProducts.
    * @returns
-   * 
+   *
    * ```ts
    * {
    *    purchaseId: string,
@@ -53,10 +54,10 @@ export class PurchasesService {
    *      imageUrl: string
    *    }>
    *  }
-   * 
+   *
    * ```
    * @throws InternalServerErrorException con detalles en caso de error.
-   * 
+   *
    * ```ts
    * {
    *    errorType: 'VALIDATION' | 'DATABASE' | 'FILE_STORAGE',
@@ -67,12 +68,12 @@ export class PurchasesService {
    *      errorDetails: string
    *    }>
    * }
-   * 
+   *
    * ```
    */
   async create(
     createPurchaseDto: CreatePurchaseDto,
-    files?: Express.Multer.File[]
+    files?: Express.Multer.File[],
   ): Promise<{
     purchaseId: string;
     updatedProducts: string[];
@@ -81,9 +82,12 @@ export class PurchasesService {
     // Arreglo para almacenar las claves de archivos subidos a S3 para poder revertir en caso de fallo.
     const s3UploadedFiles: string[] = [];
     const updatedProducts: string[] = [];
-    const createdProductsResult: Array<{ productId: string; imageUrl: string }> = [];
+    const createdProductsResult: Array<{
+      productId: string;
+      imageUrl: string;
+    }> = [];
     let purchaseRecord: Record<string, string> = {};
-    
+
     try {
       await this.prisma.$transaction(
         async (tx) => {
@@ -94,9 +98,7 @@ export class PurchasesService {
             },
             select: {
               purchases_id: true,
-            }
-
-
+            },
           });
 
           // Procesar productos existentes (si existen).
@@ -111,12 +113,13 @@ export class PurchasesService {
               });
               if (!product) {
                 throw new BadRequestException(
-                  `Product with id ${existingProductDto.product_id} not found.`
+                  `Product with id ${existingProductDto.product_id} not found.`,
                 );
               }
               // Comparar fechas: actualizar purchase_date y purchase_price si la nueva fecha es posterior.
               const newPurchaseDate = new Date(createPurchaseDto.purchase_date);
-              const stock_quantity = product.stock_quantity += existingProductDto.stock_quantity
+              const stock_quantity = (product.stock_quantity +=
+                existingProductDto.stock_quantity);
               let updateData: Record<string, string | number> = {
                 // Incrementar stock.
                 stock_quantity,
@@ -128,17 +131,20 @@ export class PurchasesService {
                   ...updateData,
                   purchase_date: newPurchaseDate.toISOString(),
                   purchase_price: existingProductDto.purchase_price,
-                  amount: Number(existingProductDto.purchase_price) * stock_quantity
+                  amount:
+                    Number(existingProductDto.purchase_price) * stock_quantity,
                 };
               }
               // await tx.products.update({
               //   where: { product_id: existingProductDto.product_id },
               //   data: updateData,
               // });
-              
-              // Actualiza producto mediante el metodo update de la clase ProductService.
-              await this.productsService.update(existingProductDto.product_id, updateData);
 
+              // Actualiza producto mediante el metodo update de la clase ProductService.
+              await this.productsService.update(
+                existingProductDto.product_id,
+                updateData,
+              );
 
               // Registrar relación en Products_purchases.
               await tx.products_purchases.create({
@@ -160,7 +166,6 @@ export class PurchasesService {
             files &&
             files.length > 0
           ) {
-            
             for (let i = 0; i < createPurchaseDto.newProducts.length; i++) {
               // Este array es para almacenar el producto a crear y pasarselo a metodo create de productService que solo admite arrays de tipo Product.
               const newProductDto: Array<RCreateProductDto> = [];
@@ -176,21 +181,27 @@ export class PurchasesService {
                 purchase_date: createPurchaseDto.purchase_date,
                 category_name: newProduct.category_name,
                 provider_name: newProduct.provider_name,
-                pos_name: newProduct.pos_name
+                pos_name: newProduct.pos_name,
               };
 
-              
-              newProductDto.push(newProductData);  
-              
+              newProductDto.push(newProductData);
 
-              const createProductResponse = await this.productsService.create(newProductDto, files, 'Service');
-              if ('createdProducts' in createProductResponse.data && 's3UploadedFiles' in createProductResponse.data) {
-                createdProductsResult.push(createProductResponse.data.createdProducts[0]);
-                s3UploadedFiles.push(createProductResponse.data.s3UploadedFiles[0]);
-                
+              const createProductResponse = await this.productsService.create(
+                newProductDto,
+                files,
+                'Service',
+              );
+              if (
+                'createdProducts' in createProductResponse.data &&
+                's3UploadedFiles' in createProductResponse.data
+              ) {
+                createdProductsResult.push(
+                  createProductResponse.data.createdProducts[0],
+                );
+                s3UploadedFiles.push(
+                  createProductResponse.data.s3UploadedFiles[0],
+                );
               }
-
-              
 
               // Registrar la relación en Products_purchases para el nuevo producto.
               await tx.products_purchases.create({
@@ -208,21 +219,21 @@ export class PurchasesService {
           timeout: 30000,
           maxWait: 35000,
           isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-        }
+        },
       );
 
       return {
         purchaseId: purchaseRecord.purchases_id,
         updatedProducts,
         createdProductsResult,
-        
       };
     } catch (error) {
       // Rollback manual de archivos S3 en caso de error.
       for (const key of s3UploadedFiles) {
         try {
           const deleteResponse = await this.s3Service.deleteFile(key);
-          if(!deleteResponse) console.error(`Failed to rollback S3 file ${key}:`)
+          if (!deleteResponse)
+            console.error(`Failed to rollback S3 file ${key}:`);
         } catch (s3Error) {
           console.error(`Failed to rollback S3 file ${key}:`, s3Error);
         }
@@ -239,21 +250,19 @@ export class PurchasesService {
       throw new InternalServerErrorException({
         errorType: 'DATABASE',
         message: 'An unexpected error occurred',
-        failedOperations: [{
-          operation: 'CREATE',
-          errorDetails: error.message
-        }]
+        failedOperations: [
+          {
+            operation: 'CREATE',
+            errorDetails: error.message,
+          },
+        ],
       });
-      
     }
   }
 
-  
   // ---------- FINDALL ----------
   async findAll(queryParams: QueryParamsDto) {
-    
-
-    const { query, limit = 10, page = 1 } = queryParams;
+    const { limit = 10, page = 1 } = queryParams;
     const result: Array<PurchasesResult> = [];
 
     try {
@@ -262,17 +271,18 @@ export class PurchasesService {
           products_purchases: true,
           _count: {
             select: {
-              products_purchases: true
-            }
-          }
+              products_purchases: true,
+            },
+          },
         },
         orderBy: {
-          created_at: 'desc'
+          created_at: 'desc',
         },
         skip: (page - 1) * limit,
         take: limit,
-      })
-  
+      });
+
+      // TODO: Refactorizar este metodo a partir de aqui procesando las compras como en el metodo findAll del modulo Sales
       purchases.forEach((purchase) => {
         const o: PurchasesResult = {
           purchase_id: '',
@@ -281,35 +291,38 @@ export class PurchasesService {
           total_stocks_added: 0,
           total_invested: 0,
           created_at: '',
-          last_update: ''
+          last_update: '',
         };
-        let total_invested: number = 0, total_stocks_added: number = 0
-  
-        o["purchase_id"] = purchase.purchases_id;
-        o["purchase_date"] = purchase.purchase_date.toISOString();
-        o["total_products_purchased"] = purchase._count.products_purchases
-        
+        let total_invested: number = 0,
+          total_stocks_added: number = 0;
+
+        o['purchase_id'] = purchase.purchases_id;
+        o['purchase_date'] = purchase.purchase_date.toISOString();
+        o['total_products_purchased'] = purchase._count.products_purchases;
+
         purchase.products_purchases.forEach((purchase_element) => {
           total_stocks_added += purchase_element.product_quantity;
-          total_invested += Number(purchase_element.product_unit_price) * purchase_element.product_quantity
-        })
-        o["total_stocks_added"] = total_stocks_added;
-        o["total_invested"] = total_invested;
-        o["created_at"] = purchase.created_at.toISOString();
-        o["last_update"] = purchase.last_update.toISOString();
-  
-        result.push(o)
-      })
-      
+          total_invested +=
+            Number(purchase_element.product_unit_price) *
+            purchase_element.product_quantity;
+        });
+        o['total_stocks_added'] = total_stocks_added;
+        o['total_invested'] = total_invested;
+        o['created_at'] = purchase.created_at.toISOString();
+        o['last_update'] = purchase.last_update.toISOString();
+
+        result.push(o);
+      });
     } catch (error) {
       console.error('ERROR AL TRAER LISTA DE LOS COMPRAS DE BD: ', error);
-      throw new InternalServerErrorException('Unespected error. Check the logs')
+      throw new InternalServerErrorException(
+        'Unespected error. Check the logs',
+      );
     }
-    
+
     const total = await this.prisma.purchases.count();
     const meta = this.paginationService.getPaginationMeta(page, limit, total);
-    
-    
+
     return {
       total,
       result,
@@ -317,15 +330,14 @@ export class PurchasesService {
     };
   }
 
-  
   // ---------- FINDONE ----------
   async findOne(uuid: string) {
     try {
       const products_purchased: Array<ProductsPurchased> = [];
-      
+
       const purchase = await this.prisma.purchases.findFirst({
         where: {
-          purchases_id: uuid
+          purchases_id: uuid,
         },
         include: {
           products_purchases: {
@@ -341,67 +353,69 @@ export class PurchasesService {
                   pos_name: true,
                   img: {
                     select: {
-                      image_thumb_key: true
+                      image_thumb_key: true,
                     },
-                    take: 1
-                  }
-                  
-                }
-              }
-            }
-          }
-        }
+                    take: 1,
+                  },
+                },
+              },
+            },
+          },
+        },
       });
 
       if (!purchase) {
-        throw new NotFoundException('Purchase not found with the provided id.')
+        throw new NotFoundException('Purchase not found with the provided id.');
       }
-      
+
       try {
         // Iterar sobre los productos comprados y crear objetos de tipo ProductsPurchased
         await Promise.all(
-  
           purchase.products_purchases.map(async (element) => {
             const o: ProductsPurchased = {
               product_id: '',
               branch: '',
               model: '',
               description: '',
-            product_quantity: 0,
-            product_unit_price: 0,
-            category_name: '',
-            provider_name: '',
-            pos_name: '',
-            imageUrl: ''
-          };
-          
-          o["product_id"] = element.product_id;
-          o["branch"] = element.products.branch;
-          o["model"] = element.products.model;
-          o["description"] = element.products.description;
-          o["product_quantity"] = element.product_quantity;
-          o["product_unit_price"] = Number(element.product_unit_price);
-          o["category_name"] = element.products.category_name;
-          o["provider_name"] = element.products.provider_name;
-          o["pos_name"] = element.products.pos_name;
-          
-          let url: string = '';
-          if (element.products.img.length > 0) {
-            url = await this.s3Service.getObjectSignedUrl(element.products.img[0].image_thumb_key);
-            o["imageUrl"] = url;  
-          }
-    
-          
-    
-          products_purchased.push(o)
-        })
-      )
-        
+              product_quantity: 0,
+              product_unit_price: 0,
+              category_name: '',
+              provider_name: '',
+              pos_name: '',
+              imageUrl: '',
+            };
+
+            o['product_id'] = element.product_id;
+            o['branch'] = element.products.branch;
+            o['model'] = element.products.model;
+            o['description'] = element.products.description;
+            o['product_quantity'] = element.product_quantity;
+            o['product_unit_price'] = Number(element.product_unit_price);
+            o['category_name'] = element.products.category_name;
+            o['provider_name'] = element.products.provider_name;
+            o['pos_name'] = element.products.pos_name;
+
+            let url: string = '';
+            if (element.products.img.length > 0) {
+              url = await this.s3Service.getObjectSignedUrl(
+                element.products.img[0].image_thumb_key,
+              );
+              o['imageUrl'] = url;
+            }
+
+            products_purchased.push(o);
+          }),
+        );
       } catch (error) {
-        console.error(`ERROR AL TRAER  DE BD EL DETALLE DE LA COMPRA CON EL ID "${uuid}": `, error);
-        throw new InternalServerErrorException('Unespected error. Check the logs.');
+        console.error(
+          `ERROR AL TRAER  DE BD EL DETALLE DE LA COMPRA CON EL ID "${uuid}": `,
+          error,
+        );
+        throw new InternalServerErrorException(
+          'Unespected error. Check the logs.',
+        );
       }
-      
+
       return {
         purchases_id: purchase?.purchases_id,
         purchase_date: purchase?.purchase_date,
@@ -409,26 +423,26 @@ export class PurchasesService {
         created_at: purchase?.created_at,
         last_update: purchase?.last_update,
       };
-      
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      console.error(`ERROR AL TRAER  DE BD EL DETALLE DE LA COMPRA CON EL ID "${uuid}": `, error);
-      throw new InternalServerErrorException('Unespected error. Check the logs.');
+      console.error(
+        `ERROR AL TRAER  DE BD EL DETALLE DE LA COMPRA CON EL ID "${uuid}": `,
+        error,
+      );
+      throw new InternalServerErrorException(
+        'Unespected error. Check the logs.',
+      );
     }
-
-
   }
   // ---------- UPDATE ----------
   async update(
     uuid: string,
-    dto: UpdatePurchaseDto
-  ): Promise<{ message: string, purchase_id: string }> {
-
+    dto: UpdatePurchaseDto,
+  ): Promise<{ message: string; purchase_id: string }> {
     try {
-
-        return this.prisma.$transaction(async (tx) => {
+      return this.prisma.$transaction(async (tx) => {
         // 1) Verificar existencia
         const purchase = await tx.purchases.findUnique({
           where: { purchases_id: uuid },
@@ -437,7 +451,7 @@ export class PurchasesService {
         if (!purchase) {
           throw new NotFoundException(`Purchase ${uuid} not found.`);
         }
-        
+
         /* 2) Posible cambio de fecha de la compra */
         const newPurchaseDate = dto.purchase_date
           ? new Date(dto.purchase_date)
@@ -466,7 +480,7 @@ export class PurchasesService {
               (p.product_quantity ?? relation.product_quantity) -
               relation.product_quantity;
 
-            await this._applyStockDelta(
+            await this.inventoryHelpers._applyStockDelta(
               tx,
               p.product_id,
               deltaQty,
@@ -487,11 +501,13 @@ export class PurchasesService {
 
             /* Sincronizar meta del producto (fecha, precio, amount) */
             if (newPurchaseDate) {
-              await this._syncProductMeta(
+              await this.inventoryHelpers._syncProductMeta(
                 tx,
                 p.product_id,
                 newPurchaseDate,
-                p.product_unit_price ?? Number(updatedRelation.product_unit_price),
+                p.product_unit_price ??
+                  Number(updatedRelation.product_unit_price),
+                this.logger,
               );
             }
           }
@@ -500,9 +516,11 @@ export class PurchasesService {
         // 4) Eliminar productos de la compra
         if (dto.deletedProducts?.length) {
           for (const d of dto.deletedProducts) {
-            await this._applyStockDelta(tx,
+            await this.inventoryHelpers._applyStockDelta(
+              tx,
               d.product_id,
-              -d.product_quantity);
+              -d.product_quantity,
+            );
 
             await tx.products_purchases.delete({
               where: {
@@ -515,23 +533,25 @@ export class PurchasesService {
           }
         }
 
-
         /* 5) Si sólo cambió la fecha, sincronizar el resto de productos no tocados */
         if (newPurchaseDate) {
           for (const rel of purchase.products_purchases) {
             /* Evitar repetir los que ya ajustamos arriba */
             const alreadyUpdated =
-              dto.updatedProducts?.some((u) => u.product_id === rel.product_id) ??
-              false;
+              dto.updatedProducts?.some(
+                (u) => u.product_id === rel.product_id,
+              ) ?? false;
             const deleted =
-              dto.deletedProducts?.some((x) => x.product_id === rel.product_id) ??
-              false;
+              dto.deletedProducts?.some(
+                (x) => x.product_id === rel.product_id,
+              ) ?? false;
             if (!alreadyUpdated && !deleted) {
-              await this._syncProductMeta(
+              await this.inventoryHelpers._syncProductMeta(
                 tx,
                 rel.product_id,
                 newPurchaseDate,
                 Number(rel.product_unit_price),
+                this.logger,
               );
             }
           }
@@ -539,21 +559,19 @@ export class PurchasesService {
 
         this.logger.log(`Purchase ${uuid} updated`);
         return { message: 'Purchase updated successfully.', purchase_id: uuid };
-      })
+      });
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
-      
-      console.error(error);
-      throw new InternalServerErrorException(`Unexpeted error while updating the purchase detail with id:'${uuid}'.`);
-    }
 
-    
-    
+      console.error(error);
+      throw new InternalServerErrorException(
+        `Unexpeted error while updating the purchase detail with id:'${uuid}'.`,
+      );
+    }
   }
 
   // ---------- DELETE ----------
   async remove(uuid: string) {
-
     try {
       return this.prisma.$transaction(async (tx) => {
         const purchase = await tx.purchases.findUnique({
@@ -566,7 +584,11 @@ export class PurchasesService {
 
         // revertir stocks
         for (const rel of purchase.products_purchases) {
-          await this._applyStockDelta(tx, rel.product_id, -rel.product_quantity);
+          await this.inventoryHelpers._applyStockDelta(
+            tx,
+            rel.product_id,
+            -rel.product_quantity,
+          );
         }
 
         // eliminar relaciones y compra
@@ -579,87 +601,14 @@ export class PurchasesService {
         return { message: 'Purchase deleted successfully.' };
       });
     } catch (error) {
-      
       if (error instanceof NotFoundException) throw error;
-      
+
       console.error(error);
-      throw new InternalServerErrorException(`Unexpeted error while deleting the purchase with id:'${uuid}'.`);
-    }
-
-    
-  }
-
-  /**
-   * Ajusta el stock del producto asegurando que nunca sea negativo y actualiza el campo amount del producto con la nueva cantidad.
-   */
-  private async _applyStockDelta(
-    tx: TxClient,
-    productId: string,
-    delta: number,
-  ) {
-    const product = await tx.products.findUnique({
-      where: { product_id: productId },
-      select: { stock_quantity: true, purchase_price: true },
-    });
-    if (!product) throw new NotFoundException(`Product ${productId} not found`);
-
-    const newQty = product.stock_quantity + delta;
-    if (newQty < 0) {
-      throw new BadRequestException(
-        `Insufficient stock to apply delta ${delta} on product ${productId}.`,
-      );
-    }
-    await tx.products.update({
-      where: { product_id: productId },
-      data: {
-        stock_quantity: newQty,
-        amount: newQty * Number(product.purchase_price),
-      },
-    });
-  }
-  
-  /**
-   * Sincroniza fecha de compra, precio y amount del producto cuando la nueva
-   * fecha es más reciente que la que posee el propio producto.
-   *
-   * @param tx          Cliente transaccional
-   * @param productId   Id del producto
-   * @param newDate     Nueva fecha de compra de la Purchase
-   * @param unitPrice   Precio unitario registrado en products_purchases (posible valor actualizado)
-  */
- private async _syncProductMeta(
-   tx: TxClient,
-   productId: string,
-   newDate: Date,
-   unitPrice: number,
-  ) {
-    const prod = await tx.products.findUnique({
-      where: { product_id: productId },
-      select: {
-        purchase_date: true,
-        purchase_price: true,
-        stock_quantity: true,
-      },
-    });
-    
-    /* Solo actualizamos si la nueva fecha es posterior */
-    if (prod && newDate > prod.purchase_date) {
-      const newAmount = new Prisma.Decimal(prod.stock_quantity)
-        .mul(new Prisma.Decimal(unitPrice),
-      );
-      
-      await tx.products.update({
-        where: { product_id: productId },
-        data: {
-          purchase_date: newDate,
-          purchase_price: new Prisma.Decimal(unitPrice),
-          amount: newAmount,
-        },
-      });
-      this.logger.debug(
-        `Producto ${productId} actualizado → fecha:${newDate.toISOString()} price:${unitPrice}`,
+      throw new InternalServerErrorException(
+        `Unexpeted error while deleting the purchase with id:'${uuid}'.`,
       );
     }
   }
-  
+
+  //TODO: Implementar soft delete
 }

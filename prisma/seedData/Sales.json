@@ -1,0 +1,30 @@
+[
+  {
+    "sales_id": "ff829ef1-5947-469a-8957-73044321f334",
+    "employee_cid": "11111111111",
+    "quantity": 1,
+    "date": "2024-11-05T23:37:27Z",
+    "total_amount": 2500
+  },
+  {
+    "sales_id": "1293d970-8da7-402d-a394-94cd712fb7ec",
+    "employee_cid": "11111111111",
+    "quantity": 2,
+    "date": "2024-11-05T23:37:27Z",
+    "total_amount": 4000
+  },
+  {
+    "sales_id": "75da1887-6d8f-4f28-b295-ce6719195fee",
+    "employee_cid": "11111111111",
+    "quantity": 3,
+    "date": "2024-11-05T23:37:27Z",
+    "total_amount": 31500
+  },
+  {
+    "sales_id": "2afd6627-d58b-45f8-b226-46a823fba123",
+    "employee_cid": "22222222222",
+    "quantity": 4,
+    "date": "2024-11-05T23:37:27Z",
+    "total_amount": 36800
+  }
+]

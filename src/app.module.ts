@@ -7,11 +7,12 @@ import { ProductCategoriesModule } from './product_categories/product_categories
 import { ProductsModule } from './products/products.module';
 import { EmployeesModule } from './employees/employees.module';
 import { PurchasesModule } from './purchases/purchases.module';
+import { SalesModule } from './sales/sales.module';
 
 @Module({
   imports: [ConfigModule.forRoot({
     isGlobal: true,
     cache: true,
-  }),CommonModule, PointOfSalesModule,  ProvidersModule, ProductCategoriesModule, ProductsModule, EmployeesModule, PurchasesModule],
+  }),CommonModule, PointOfSalesModule,  ProvidersModule, ProductCategoriesModule, ProductsModule, EmployeesModule, PurchasesModule, SalesModule],
 })
 export class AppModule {}

@@ -1,0 +1,176 @@
+generator client {
+  provider        = "prisma-client-js"
+  output          = "src/prisma/generated/client"
+  previewFeatures = ["typedSql"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Points_of_sales {
+  point_of_sales_id String      @id @default(uuid()) @db.Uuid
+  name              String      @unique @db.VarChar(45)
+  address           String      @db.VarChar(100)
+  img               String?     @default("no-image") @db.VarChar
+  created_at        DateTime    @default(now())
+  last_update       DateTime    @updatedAt
+  employees         Employees[]
+  products          Products[]
+}
+
+model Products_categories {
+  products_categories_id String     @id @default(uuid()) @db.Uuid
+  name                   String     @unique @db.VarChar(45)
+  created_at             DateTime   @default(now())
+  last_update            DateTime   @updatedAt
+  products               Products[]
+}
+
+model Providers {
+  provider_id  String     @id @default(uuid()) @db.Uuid
+  name         String     @unique @db.VarChar(45)
+  phone_number String     @unique @db.VarChar(45)
+  email        String?    @unique @db.VarChar(100)
+  img          String?    @default("no-image") @db.VarChar
+  created_at   DateTime   @default(now())
+  last_update  DateTime   @updatedAt
+  products     Products[]
+}
+
+model Products {
+  product_id         String               @id @default(uuid()) @db.Uuid
+  branch             String               @db.VarChar(45)
+  model              String               @db.VarChar(45)
+  description        String               @db.VarChar(255)
+  purchase_price     Decimal              @db.Decimal(10, 2)
+  stock_quantity     Int
+  amount             Decimal              @db.Decimal(10, 2)
+  purchase_date      DateTime
+  category_name      String
+  provider_name      String
+  pos_name           String
+  created_at         DateTime             @default(now())
+  last_update        DateTime             @updatedAt
+  category           Products_categories  @relation(fields: [category_name], references: [name])
+  points_of_sales    Points_of_sales      @relation(fields: [pos_name], references: [name])
+  provider           Providers            @relation(fields: [provider_name], references: [name])
+  img                Products_images[]
+  products_purchases Products_purchases[]
+  products_sales     Products_sales[]
+}
+
+model Products_images {
+  id                 String   @db.Uuid
+  image_original_key String   @unique @db.VarChar
+  image_thumb_key    String   @unique @db.VarChar
+  created_at         DateTime @default(now())
+  last_update        DateTime @default(now()) @updatedAt
+  product            Products @relation(fields: [id], references: [product_id], onDelete: Cascade)
+}
+
+model Employees {
+  employee_id    String          @id @default(uuid()) @db.Uuid
+  CID            String          @unique @db.VarChar(11)
+  first_name     String          @db.VarChar(45)
+  last_name      String          @db.VarChar(45)
+  address        String          @db.VarChar(100)
+  phone_number   String?         @unique @db.VarChar(45)
+  img            String?         @default("no-image") @db.VarChar
+  pos_name       String
+  created_at     DateTime        @default(now())
+  last_update    DateTime        @updatedAt
+  point_of_sales Points_of_sales @relation(fields: [pos_name], references: [name])
+  salary         Salary?
+  sales          Sales[]
+  user           Users?
+}
+
+model Salary {
+  employee_cid String    @unique
+  amount       Decimal   @db.Decimal(10, 2)
+  date         DateTime  @db.Date
+  created_at   DateTime  @default(now())
+  last_update  DateTime  @updatedAt
+  employee     Employees @relation(fields: [employee_cid], references: [CID])
+}
+
+model Sales {
+  sales_id     String    @id @default(uuid()) @db.Uuid
+  employee_cid String
+  date         DateTime  @db.Date
+  total_amount Decimal   @default(0) @db.Decimal(14, 2)
+  created_at   DateTime  @default(now())
+  last_update  DateTime  @updatedAt
+  deleted_at   DateTime? @db.Timestamp(6)
+
+  products_sales Products_sales[]
+  employee       Employees        @relation(fields: [employee_cid], references: [CID])
+
+  @@index([employee_cid])
+}
+
+model Products_sales {
+  sale_id     String   @db.Uuid
+  product_id  String   @db.Uuid
+  quantity    Int
+  unit_price  Decimal  @db.Decimal(10, 2)
+  total_price Decimal  @db.Decimal(14, 2)
+  // discount_percent Int?     @default(0)
+  product     Products @relation(fields: [product_id], references: [product_id])
+  sale        Sales    @relation(fields: [sale_id], references: [sales_id])
+
+  @@id([sale_id, product_id])
+}
+
+model Purchases {
+  purchases_id       String               @id @default(uuid()) @db.Uuid
+  purchase_date      DateTime
+  created_at         DateTime             @default(now())
+  last_update        DateTime             @updatedAt
+  products_purchases Products_purchases[]
+}
+
+model Products_purchases {
+  purchase_id        String    @db.Uuid
+  product_id         String    @db.Uuid
+  product_quantity   Int
+  product_unit_price Decimal   @db.Decimal(10, 2)
+  products           Products  @relation(fields: [product_id], references: [product_id])
+  purchases          Purchases @relation(fields: [purchase_id], references: [purchases_id])
+  created_at         DateTime  @default(now())
+  last_update        DateTime  @updatedAt
+
+  @@id([purchase_id, product_id])
+}
+
+model Expenses_category {
+  expense_category_id String     @id @default(uuid()) @db.Uuid
+  name                String     @unique @db.VarChar(45)
+  created_at          DateTime   @default(now())
+  last_update         DateTime   @updatedAt
+  Expenses            Expenses[]
+}
+
+model Expenses {
+  expenses_id       String            @id @default(uuid()) @db.Uuid
+  amount            Decimal           @db.Decimal(10, 2)
+  date              DateTime
+  exp_category_name String
+  created_at        DateTime          @default(now())
+  last_update       DateTime          @updatedAt
+  Expenses_category Expenses_category @relation(fields: [exp_category_name], references: [name])
+}
+
+model Users {
+  user_id          String    @id @default(uuid()) @db.Uuid
+  username         String    @unique @db.VarChar(16)
+  password         String
+  employee_id      String    @unique @db.Uuid
+  role             String
+  created_at       DateTime  @default(now())
+  last_time_online DateTime?
+  last_update      DateTime  @updatedAt
+  employee         Employees @relation(fields: [employee_id], references: [employee_id])
+}
