@@ -307,6 +307,7 @@ export class ProductsService {
           pos_name: true,
           created_at: true,
           last_update: true,
+          deleted_at: true,
           img: true,
         },
         orderBy: { created_at: 'desc' },

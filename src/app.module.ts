@@ -8,11 +8,12 @@ import { ProductsModule } from './products/products.module';
 import { EmployeesModule } from './employees/employees.module';
 import { PurchasesModule } from './purchases/purchases.module';
 import { SalesModule } from './sales/sales.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [ConfigModule.forRoot({
     isGlobal: true,
     cache: true,
-  }),CommonModule, PointOfSalesModule,  ProvidersModule, ProductCategoriesModule, ProductsModule, EmployeesModule, PurchasesModule, SalesModule],
+  }),CommonModule, PointOfSalesModule,  ProvidersModule, ProductCategoriesModule, ProductsModule, EmployeesModule, PurchasesModule, SalesModule, UsersModule],
 })
 export class AppModule {}

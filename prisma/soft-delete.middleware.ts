@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 
 export const softDeleteMiddleware: Prisma.Middleware = async (params, next) => {
   // Define los modelos que usarán soft delete (usa los nombres exactos de tu schema.prisma, ej: "Sales")
-  const softDeleteModels = ['Sales']; // Asegurarse que 'Sales' sea el nombre exacto del modelo definido en schema.prisma
+  const softDeleteModels = ['Sales', 'User']; // Asegurarse que 'Sales' sea el nombre exacto del modelo definido en schema.prisma
 
   if (params.model && softDeleteModels.includes(params.model)) {
     // --- Manejo de operaciones de eliminación ---

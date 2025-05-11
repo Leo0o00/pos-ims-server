@@ -53,6 +53,7 @@ model Products {
   pos_name           String
   created_at         DateTime             @default(now())
   last_update        DateTime             @updatedAt
+  deleted_at         DateTime?               @db.Timestamp(6)
   category           Products_categories  @relation(fields: [category_name], references: [name])
   points_of_sales    Points_of_sales      @relation(fields: [pos_name], references: [name])
   provider           Providers            @relation(fields: [provider_name], references: [name])
@@ -81,10 +82,11 @@ model Employees {
   pos_name       String
   created_at     DateTime        @default(now())
   last_update    DateTime        @updatedAt
+  deleted_at     DateTime?       @db.Timestamp(6)
   point_of_sales Points_of_sales @relation(fields: [pos_name], references: [name])
   salary         Salary?
   sales          Sales[]
-  user           Users?
+  user           User?
 }
 
 model Salary {
@@ -131,6 +133,8 @@ model Purchases {
   purchase_date      DateTime
   created_at         DateTime             @default(now())
   last_update        DateTime             @updatedAt
+  deleted_at         DateTime?            @db.Timestamp(6)
+
   products_purchases Products_purchases[]
 }
 
@@ -145,6 +149,31 @@ model Products_purchases {
   last_update        DateTime  @updatedAt
 
   @@id([purchase_id, product_id])
+}
+
+enum UserRole {
+  ADMIN     // Acceso total
+  MANAGER   // Acceso a ciertas partes administrativas y de gestión
+  CASHIER   // Acceso limitado al punto de venta
+}
+
+model User {
+  user_id     String     @id @default(uuid()) @db.Uuid
+  email       String     @unique // Usado para login
+  password    String     // Almacena el hash de la contraseña
+  first_name  String
+  last_name   String
+  roles       UserRole[] @default([CASHIER]) // Un usuario puede tener múltiples roles
+  is_active   Boolean    @default(true)     // Para desactivar usuarios sin eliminarlos
+  created_at  DateTime   @default(now())
+  last_update DateTime   @updatedAt
+  deleted_at  DateTime?  // Para soft-delete
+
+  // Relación opcional con Employees: un User puede estar vinculado a un Employee
+  employee    Employees? @relation(fields: [employee_id], references: [employee_id])
+  employee_id String?    @db.Uuid @unique // Clave foránea opcional
+
+  @@map("Users")
 }
 
 model Expenses_category {
@@ -165,14 +194,4 @@ model Expenses {
   Expenses_category Expenses_category @relation(fields: [exp_category_name], references: [name])
 }
 
-model Users {
-  user_id          String    @id @default(uuid()) @db.Uuid
-  username         String    @unique @db.VarChar(16)
-  password         String
-  employee_id      String    @unique @db.Uuid
-  role             String
-  created_at       DateTime  @default(now())
-  last_time_online DateTime?
-  last_update      DateTime  @updatedAt
-  employee         Employees @relation(fields: [employee_id], references: [employee_id])
-}
+
