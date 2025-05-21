@@ -31,9 +31,11 @@ export class PointOfSalesService {
         );
       }
 
-      return await this.prisma.points_of_sales.create({
+      await this.prisma.points_of_sales.create({
         data,
       });
+
+      return true;
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;

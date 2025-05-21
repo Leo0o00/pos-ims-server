@@ -21,10 +21,9 @@ export class PointOfSalesController {
   @Post()
   @Roles(UserRole.ADMIN)
   async create(@Body() createPointOfSaleDto: CreatePointOfSaleDto) {
-    const result = await this.pointOfSalesService.create(createPointOfSaleDto);
+    await this.pointOfSalesService.create(createPointOfSaleDto);
     return {
       message: 'Point of sales created successfully',
-      result,
     };
   }
 

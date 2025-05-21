@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { CreateProductCategoryDto } from './dto/create-product_category.dto';
 import { UpdateProductCategoryDto } from './dto/update-product_category.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -6,30 +11,27 @@ import { PaginationService } from 'src/common/pagination/pagination.service';
 
 @Injectable()
 export class ProductCategoriesService {
-  
   constructor(
     private prisma: PrismaService,
     private readonly paginationService: PaginationService,
-  ){}
-  
+  ) {}
+
   async create(data: CreateProductCategoryDto) {
     try {
-      const existingProductCategory = await this.prisma.products_categories.findFirst({
-      where: {
-        name: data.name
+      const existingProductCategory =
+        await this.prisma.products_categories.findFirst({
+          where: {
+            name: data.name,
+          },
+        });
+      if (existingProductCategory) {
+        throw new BadRequestException('Product category already exists.');
       }
-    });
-    if (existingProductCategory) {
-      throw new BadRequestException('Product category already exists.');
-    }
-    const productCategoryCreated = await this.prisma.products_categories.create({
-      data
-    });
+      await this.prisma.products_categories.create({
+        data,
+      });
 
-    return {
-      message: 'Product category created successfully.',
-      data: productCategoryCreated
-    };
+      return true;
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
@@ -42,17 +44,17 @@ export class ProductCategoriesService {
 
   async findAll(page = 1, limit = 10) {
     try {
-      const productCategories = await this.prisma.products_categories.findMany({
+      const result = await this.prisma.products_categories.findMany({
         skip: (page - 1) * limit,
         take: limit,
       });
       const total = await this.prisma.products_categories.count();
       const meta = this.paginationService.getPaginationMeta(page, limit, total);
-  
+
       return {
-          total,
-          productCategories,
-          meta,
+        total,
+        result,
+        meta,
       };
     } catch (error) {
       console.error(error);
@@ -62,37 +64,43 @@ export class ProductCategoriesService {
 
   async update(updateProductCategoryDto: UpdateProductCategoryDto) {
     try {
-      const existingProductCategory = await this.prisma.products_categories.findFirst({
-        where: {
-          products_categories_id: updateProductCategoryDto.products_categories_id
-        }
-      });
+      const existingProductCategory =
+        await this.prisma.products_categories.findFirst({
+          where: {
+            products_categories_id:
+              updateProductCategoryDto.products_categories_id,
+          },
+        });
 
       if (!existingProductCategory) {
-        throw new NotFoundException('Product category not found with the provided id.');
+        throw new NotFoundException(
+          'Product category not found with the provided id.',
+        );
       }
 
-      const existingProductCategoryName = await this.prisma.products_categories.findFirst({
-        where: {
-          name: updateProductCategoryDto.name
-        }
-      });
+      const existingProductCategoryName =
+        await this.prisma.products_categories.findFirst({
+          where: {
+            name: updateProductCategoryDto.name,
+          },
+        });
 
       if (existingProductCategoryName) {
-        throw new BadRequestException('Product category already exists with that name.');
+        throw new BadRequestException(
+          'Product category already exists with that name.',
+        );
       }
 
-      const updatedProductCategory = await this.prisma.products_categories.update({
-        where: {
-          products_categories_id: updateProductCategoryDto.products_categories_id
-        },
-        data: updateProductCategoryDto
-      });
+      const updatedProductCategory =
+        await this.prisma.products_categories.update({
+          where: {
+            products_categories_id:
+              updateProductCategoryDto.products_categories_id,
+          },
+          data: updateProductCategoryDto,
+        });
 
-      return {
-        message: 'Product category updated successfully.',
-        data: updatedProductCategory
-      };
+      return updatedProductCategory;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -108,25 +116,26 @@ export class ProductCategoriesService {
 
   async remove(id: string) {
     try {
-      const existingProductCategory = await this.prisma.products_categories.findFirst({
-        where: {
-          products_categories_id: id,
-        }
-      });
+      const existingProductCategory =
+        await this.prisma.products_categories.findFirst({
+          where: {
+            products_categories_id: id,
+          },
+        });
 
       if (!existingProductCategory) {
-        throw new NotFoundException('Product category not found with the provided id.');
+        throw new NotFoundException(
+          'Product category not found with the provided id.',
+        );
       }
 
       await this.prisma.products_categories.delete({
         where: {
           products_categories_id: id,
-        }
+        },
       });
 
-      return {
-        message: 'Product category deleted successfully.'
-      }
+      return true;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
