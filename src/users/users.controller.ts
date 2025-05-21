@@ -14,12 +14,16 @@ import {
   HttpStatus,
   NotFoundException,
   SerializeOptions,
+  UseGuards,
   // Query // Para paginación si la implementas
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user.response.dto'; // Importa el DTO de respuesta
+import { UserRole } from '@prisma/client';
+import { Roles } from 'src/auth/decorators/roles.decorator';
+import { RolesGuard } from 'src/auth/guards/roles.guard';
 
 @Controller('users')
 @UseInterceptors(ClassSerializerInterceptor) // Aplica el interceptor para transformar respuestas
@@ -28,6 +32,8 @@ export class UsersController {
 
   @SerializeOptions({ type: UserResponseDto })
   @Post()
+  @Roles(UserRole.ADMIN) // Solo ADMINS pueden crear usuarios
+  @UseGuards(RolesGuard) // Aplica el RolesGuard específicamente aquí (o a nivel de controlador)
   async create(@Body() createUserDto: CreateUserDto): Promise<UserResponseDto> {
     const user = await this.usersService.create(createUserDto);
     return new UserResponseDto(user); // Transforma a UserResponseDto

@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -6,41 +11,37 @@ import { PaginationService } from 'src/common/pagination/pagination.service';
 
 @Injectable()
 export class EmployeesService {
-
-  
   constructor(
     private prisma: PrismaService,
     private readonly paginationService: PaginationService,
   ) {}
 
-
-  
   async create(data: CreateEmployeeDto) {
     try {
-
       const validPos = await this.prisma.points_of_sales.findFirst({
         where: {
-          name: data.pos_name
-        }
+          name: data.pos_name,
+        },
       });
-      
+
       if (!validPos) {
-        throw new BadRequestException('There is not exist a point of sales with than name.');
-      }
-      
-      const existingEmployee = await this.prisma.employees.findFirst({
-        where: {
-          OR: [
-            { CID: data.CID },
-            { phone_number: data.phone_number }
-          ]
-        }
-      });
-      if (existingEmployee) {
-        throw new BadRequestException('Employee already exists with that CID or phone number.');
+        throw new BadRequestException(
+          'There is not exist a point of sales with than name.',
+        );
       }
 
-      const employeeCreated = await this.prisma.employees.create({
+      const existingEmployee = await this.prisma.employees.findFirst({
+        where: {
+          OR: [{ CID: data.CID }, { phone_number: data.phone_number }],
+        },
+      });
+      if (existingEmployee) {
+        throw new BadRequestException(
+          'Employee already exists with that CID or phone number.',
+        );
+      }
+
+      await this.prisma.employees.create({
         data: {
           CID: data.CID,
           first_name: data.first_name,
@@ -52,69 +53,56 @@ export class EmployeesService {
             create: {
               amount: data.salary_amount,
               date: data.payment_date,
-            }
+            },
           },
-          
-          
-        }
+        },
       });
 
-      
-
-      return {
-        message: 'Employee created successfully',
-        data: employeeCreated,
-      };
-
+      return true;
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
       }
       console.error(error);
-      throw new InternalServerErrorException('Unexpected error while creating employee.');
+      throw new InternalServerErrorException(
+        'Unexpected error while creating employee.',
+      );
     }
   }
 
   async findAll(page = 1, limit = 10) {
-
     try {
-
-      
       const result = await this.prisma.employees.findMany({
         skip: (page - 1) * limit,
         take: limit,
       });
       const total = await this.prisma.employees.count();
       const meta = this.paginationService.getPaginationMeta(page, limit, total);
-  
-  
+
       return {
         total,
         result,
         meta,
       };
-  
     } catch (error) {
       console.error(error);
-      throw new InternalServerErrorException('Unespected error.')
+      throw new InternalServerErrorException('Unespected error.');
     }
-
   }
 
   async findOne(uuid: string) {
     try {
       const existingEmployee = await this.prisma.employees.findFirst({
         where: {
-          employee_id: uuid
+          employee_id: uuid,
         },
         include: {
-          salary: true
-        }
-      })
-      
-      
-      if(!existingEmployee) {
-        throw new NotFoundException('Employee not found with the provided id.')
+          salary: true,
+        },
+      });
+
+      if (!existingEmployee) {
+        throw new NotFoundException('Employee not found with the provided id.');
       }
 
       return {
@@ -129,10 +117,8 @@ export class EmployeesService {
         salary_amount: existingEmployee.salary?.amount,
         payment_date: existingEmployee.salary?.date,
         created_at: existingEmployee.created_at,
-        last_update: existingEmployee.last_update
-      }
-
-
+        last_update: existingEmployee.last_update,
+      };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -146,47 +132,52 @@ export class EmployeesService {
     try {
       const existingEmployee = await this.prisma.employees.findFirst({
         where: {
-          employee_id: uuid
+          employee_id: uuid,
         },
         include: {
-          salary: true
-        }
-      })
-      if(!existingEmployee) {
-        throw new NotFoundException('Employee not found with the provided id.')
+          salary: true,
+        },
+      });
+      if (!existingEmployee) {
+        throw new NotFoundException('Employee not found with the provided id.');
       }
 
       if (updateEmployeeDto.pos_name) {
         const validPos = await this.prisma.points_of_sales.findFirst({
           where: {
-            name: updateEmployeeDto.pos_name
-          }
+            name: updateEmployeeDto.pos_name,
+          },
         });
         if (!validPos) {
-          throw new BadRequestException('There is not exist a point of sales with than name.');
+          throw new BadRequestException(
+            'There is not exist a point of sales with than name.',
+          );
         }
       }
 
       if (updateEmployeeDto.CID || updateEmployeeDto.phone_number) {
-        const employeeWithExistingPhoneNumberOrCID = await this.prisma.employees.findFirst({
-          where: {
-            OR: [
-              { CID: updateEmployeeDto.CID },
-              { phone_number: updateEmployeeDto.phone_number }
-            ]
-          }
-        });
+        const employeeWithExistingPhoneNumberOrCID =
+          await this.prisma.employees.findFirst({
+            where: {
+              OR: [
+                { CID: updateEmployeeDto.CID },
+                { phone_number: updateEmployeeDto.phone_number },
+              ],
+            },
+          });
         if (employeeWithExistingPhoneNumberOrCID) {
-          throw new BadRequestException('Employee already exists with that CID or phone number.');
-        } 
+          throw new BadRequestException(
+            'Employee already exists with that CID or phone number.',
+          );
+        }
       }
-      
+
       const updatedEmployee = await this.prisma.employees.update({
         where: {
-          employee_id: uuid
+          employee_id: uuid,
         },
         include: {
-          salary: true
+          salary: true,
         },
         data: {
           CID: updateEmployeeDto.CID,
@@ -199,40 +190,37 @@ export class EmployeesService {
             update: {
               amount: updateEmployeeDto.salary_amount,
               date: updateEmployeeDto.payment_date,
-            }
+            },
           },
-        }
-      })
+        },
+      });
       return {
-        message: 'Employee updated successfully',
-        data: {
-          employee_id: updatedEmployee.employee_id,
-          CID: updatedEmployee.CID,
-          first_name: updatedEmployee.first_name,
-          last_name: updatedEmployee.last_name,
-          address: updatedEmployee.address,
-          phone_number: updatedEmployee.phone_number,
-          img: updatedEmployee.img,
-          pos_name: updatedEmployee.pos_name,
-          salary_amount: updatedEmployee.salary?.amount,
-          payment_date: updatedEmployee.salary?.date,
-          created_at: updatedEmployee.created_at,
-          last_update: updatedEmployee.last_update
-        }
-      }
-
-
+        employee_id: updatedEmployee.employee_id,
+        CID: updatedEmployee.CID,
+        first_name: updatedEmployee.first_name,
+        last_name: updatedEmployee.last_name,
+        address: updatedEmployee.address,
+        phone_number: updatedEmployee.phone_number,
+        img: updatedEmployee.img,
+        pos_name: updatedEmployee.pos_name,
+        salary_amount: updatedEmployee.salary?.amount,
+        payment_date: updatedEmployee.salary?.date,
+        created_at: updatedEmployee.created_at,
+        last_update: updatedEmployee.last_update,
+      };
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      
+
       if (error instanceof NotFoundException) {
         throw error;
       }
 
       console.error(error);
-      throw new InternalServerErrorException('Unespected error while updating employee.');
+      throw new InternalServerErrorException(
+        'Unespected error while updating employee.',
+      );
     }
   }
 
@@ -240,40 +228,39 @@ export class EmployeesService {
     try {
       const existingEmployee = await this.prisma.employees.findFirst({
         where: {
-          employee_id: uuid
+          employee_id: uuid,
         },
         include: {
-          salary: true
-        }
+          salary: true,
+        },
       });
 
-      if(!existingEmployee) {
-        throw new NotFoundException('Employee not found with the provided id.')
+      if (!existingEmployee) {
+        throw new NotFoundException('Employee not found with the provided id.');
       }
 
       this.prisma.$transaction(async (tx) => {
         await tx.salary.delete({
           where: {
-            employee_cid: existingEmployee.CID
-          }
+            employee_cid: existingEmployee.CID,
+          },
         });
         await tx.employees.delete({
           where: {
-            employee_id: uuid
+            employee_id: uuid,
           },
         });
-      })
+      });
 
-      return {
-        message: 'Employee deleted successfully.'
-      };
-
+      return true;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
       console.error(error);
-      throw new InternalServerErrorException('Unexpected error while deleting employee.')
+      throw new InternalServerErrorException(
+        'Unexpected error while deleting employee.',
+      );
     }
   }
 }

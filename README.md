@@ -41,7 +41,7 @@ $ pnpm run start
 # watch mode
 $ pnpm run start:dev
 
-# To speed up the development process (x20 times faster builds), you can use the SWC builder by passing the -b swc flag to the start script, as follows 
+# To speed up the development process (x20 times faster builds), you can use the SWC builder by passing the -b swc flag to the start script, as follows
 $ pnpm run start -- -b swc.
 
 # production mode
@@ -103,12 +103,10 @@ Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
 
 ## Lista de Refactorizaciones que tengo que hacer:
 
-- Debo arreglar la paginacion de los metodos ***findAll*** para validar los query parameters con un Dto y asi poder mostrar al usuario un mensaje de error mas claro cuando introduzca un valor indevido
 - Separar las responsabilidades entre los controladores y los servicios en los modulos:
   - **Point of Sales**
   - **Products categories**
   - **Providers**
   - **Products**
   - **Employees**
-  > Con esto me refiero a que debo hacer que el controllador sea quien construya el objeto con los mensajes que se le devuelve al usuario.
-- 
+    > Con esto me refiero a que debo hacer que el controllador sea quien construya el objeto con los mensajes que se le devuelve al usuario.

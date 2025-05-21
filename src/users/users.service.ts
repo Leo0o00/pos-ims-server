@@ -6,18 +6,16 @@ import {
   InternalServerErrorException,
   BadRequestException,
 } from '@nestjs/common';
+import * as bcrypt from 'bcrypt'; // Cambiado a bcryptjs para evitar problemas de compatibilidad
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Prisma, User } from '@prisma/client';
-import { EncryptionService } from 'src/common/encryption/encryption.service';
 
 @Injectable()
 export class UsersService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly encryptionService: EncryptionService,
-  ) {}
+  private readonly SALT_ROUNDS = 10; // Cambiar a un valor más seguro en producción
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createUserDto: CreateUserDto): Promise<Omit<User, 'password'>> {
     const { email, password, employee_id, ...userData } = createUserDto;
@@ -49,7 +47,7 @@ export class UsersService {
       }
     }
 
-    const hashedPassword = this.encryptionService.encrypt(password);
+    const hashedPassword = await bcrypt.hash(password, this.SALT_ROUNDS);
 
     try {
       const user = await this.prisma.user.create({
@@ -100,7 +98,7 @@ export class UsersService {
     return result;
   }
 
-  async findByEmail(email: string): Promise<User | null> {
+  async findByEmailForAuth(email: string): Promise<User | null> {
     // Este método será útil para el módulo de autenticación
     // No excluye la contraseña porque el servicio de autenticación la necesitará para comparar
     return this.prisma.user.findUnique({
@@ -156,7 +154,7 @@ export class UsersService {
     const data: Prisma.UserUncheckedUpdateInput = { ...userDataToUpdate };
 
     if (password) {
-      data.password = this.encryptionService.encrypt(password);
+      data.password = await bcrypt.hash(password, this.SALT_ROUNDS);
     }
     if (email) {
       data.email = email;

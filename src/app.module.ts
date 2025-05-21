@@ -9,11 +9,26 @@ import { EmployeesModule } from './employees/employees.module';
 import { PurchasesModule } from './purchases/purchases.module';
 import { SalesModule } from './sales/sales.module';
 import { UsersModule } from './users/users.module';
+import { AuthModule } from './auth/auth.module';
+import jwtConfig from './config/jwt.config';
 
 @Module({
-  imports: [ConfigModule.forRoot({
-    isGlobal: true,
-    cache: true,
-  }),CommonModule, PointOfSalesModule,  ProvidersModule, ProductCategoriesModule, ProductsModule, EmployeesModule, PurchasesModule, SalesModule, UsersModule],
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      load: [jwtConfig],
+      cache: true,
+    }),
+    CommonModule,
+    PointOfSalesModule,
+    ProvidersModule,
+    ProductCategoriesModule,
+    ProductsModule,
+    EmployeesModule,
+    PurchasesModule,
+    SalesModule,
+    UsersModule,
+    AuthModule,
+  ],
 })
 export class AppModule {}
