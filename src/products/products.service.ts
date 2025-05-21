@@ -554,10 +554,7 @@ export class ProductsService {
             }
           }
 
-          return {
-            message: 'Product updated successfully.',
-            product_id: uuid,
-          };
+          return true;
         },
         {
           timeout: 30000, // Increase timeout to 30 seconds
@@ -640,9 +637,7 @@ export class ProductsService {
             }),
           );
 
-          return {
-            message: 'Products deleted successfully.',
-          };
+          return true;
         },
         {
           timeout: 30000, // Increase timeout to 30 seconds
