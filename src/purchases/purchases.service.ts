@@ -598,7 +598,7 @@ export class PurchasesService {
         await tx.purchases.delete({ where: { purchases_id: uuid } });
 
         this.logger.warn(`Purchase ${uuid} deleted`);
-        return { message: 'Purchase deleted successfully.' };
+        return true;
       });
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
