@@ -61,7 +61,7 @@ export class SalesService {
         // 4) calcular total
         await this.inventoryHelpers._recalcTotal(tx, sale.sales_id);
 
-        return { message: 'Sale created', sales_id: sale.sales_id };
+        return sale.sales_id;
       });
     } catch (error) {
       if (error instanceof BadRequestException) throw error;
@@ -329,7 +329,7 @@ export class SalesService {
         }
 
         await this.inventoryHelpers._recalcTotal(tx, id);
-        return { message: 'Sale updated', sales_id: id };
+        return id;
       });
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
@@ -369,7 +369,7 @@ export class SalesService {
           );
         }
         await tx.sales.delete({ where: { sales_id: id } }); // middleware → soft
-        return { message: 'Sale soft-deleted' };
+        return true;
       });
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
@@ -417,7 +417,7 @@ export class SalesService {
           where: { sales_id: id },
           data: { deleted_at: null },
         });
-        return { message: 'Sale restored' };
+        return id;
       });
     } catch (error) {
       if (error instanceof NotFoundException) throw error;

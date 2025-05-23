@@ -53,8 +53,14 @@ export class PurchasesController {
     newProductImages: Array<Express.Multer.File>,
     @Body() createPurchaseDto: CreatePurchaseDto,
   ) {
-    await this.purchasesService.create(createPurchaseDto, newProductImages);
-    return { message: 'Purchase successfully created!' };
+    const result = await this.purchasesService.create(
+      createPurchaseDto,
+      newProductImages,
+    );
+    return {
+      message: 'Purchase successfully created!',
+      purchase_id: result.purchaseId,
+    };
   }
 
   @Get()
@@ -77,7 +83,7 @@ export class PurchasesController {
   async findOne(
     @Param(
       'uuid',
-      new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.NOT_ACCEPTABLE }),
+      new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.BAD_REQUEST }),
     )
     uuid: string,
   ) {

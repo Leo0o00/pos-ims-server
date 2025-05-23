@@ -73,7 +73,7 @@ export class ProductsController {
   async findOne(
     @Param(
       'uuid',
-      new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.NOT_ACCEPTABLE }),
+      new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.BAD_REQUEST }),
     )
     uuid: string,
   ) {

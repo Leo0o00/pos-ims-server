@@ -1,21 +1,20 @@
 // src/users/users.controller.ts
 import {
-  Controller,
-  Get,
-  Post,
   Body,
-  Patch,
-  Param,
+  ClassSerializerInterceptor,
+  Controller,
   Delete,
-  ParseUUIDPipe,
-  UseInterceptors,
-  ClassSerializerInterceptor, // Para que UserResponseDto funcione bien con @Exclude/@Expose
+  Get,
   HttpCode,
   HttpStatus,
   NotFoundException,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
   SerializeOptions,
   UseGuards,
-  // Query // Para paginación si la implementas
+  UseInterceptors,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -41,6 +40,7 @@ export class UsersController {
 
   @SerializeOptions({ type: UserResponseDto })
   @Get()
+  @Roles(UserRole.ADMIN)
   async findAll(): Promise<UserResponseDto[]> {
     const users = await this.usersService.findAll();
     return users.map((user) => new UserResponseDto(user));
@@ -48,6 +48,7 @@ export class UsersController {
 
   @SerializeOptions({ type: UserResponseDto })
   @Get(':user_id')
+  @Roles(UserRole.ADMIN)
   async findOne(
     @Param('user_id', ParseUUIDPipe) user_id: string,
   ): Promise<UserResponseDto> {
@@ -60,6 +61,7 @@ export class UsersController {
 
   @SerializeOptions({ type: UserResponseDto })
   @Patch(':user_id')
+  @Roles(UserRole.ADMIN)
   async update(
     @Param('user_id', ParseUUIDPipe) user_id: string,
     @Body() updateUserDto: UpdateUserDto,
@@ -70,6 +72,7 @@ export class UsersController {
 
   @Delete(':user_id')
   @HttpCode(HttpStatus.NO_CONTENT) // O devuelve un mensaje
+  @Roles(UserRole.ADMIN)
   async remove(
     @Param('user_id', ParseUUIDPipe) user_id: string,
   ): Promise<{ message: string }> {

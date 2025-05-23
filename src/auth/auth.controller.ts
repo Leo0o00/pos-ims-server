@@ -1,23 +1,24 @@
 import {
-  Controller,
-  Post,
   Body,
-  UseGuards,
-  Request,
+  ClassSerializerInterceptor,
+  Controller,
   Get,
   HttpCode,
   HttpStatus,
+  Post,
+  Request,
+  UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LocalAuthGuard } from './guards/local-auth.guard';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from './decorators/public.decorator';
 import { AuthenticatedUser } from './decorators/user.decorator'; // Decorador para obtener el usuario
 import { UsersService } from '../users/users.service';
 import { CreateUserDto } from '../users/dto/create-user.dto'; // Asumiendo que CreateUserDto es para registro
 import { UserResponseDto } from '../users/dto/user.response.dto';
-import { ClassSerializerInterceptor, UseInterceptors } from '@nestjs/common';
-import { User as PrismaUser } from '@prisma/client';
+import { User as PrismaUser, UserRole } from '@prisma/client';
+import { Roles } from './decorators/roles.decorator';
 
 @Controller('auth')
 @UseInterceptors(ClassSerializerInterceptor) // Para que UserResponseDto funcione
@@ -39,6 +40,7 @@ export class AuthController {
 
   // Solo el administrador puede registrar usuarios
   @Post('register')
+  @Roles(UserRole.ADMIN)
   async register(
     @Body() createUserDto: CreateUserDto,
   ): Promise<UserResponseDto> {
@@ -48,8 +50,8 @@ export class AuthController {
     return new UserResponseDto(user);
   }
 
-  @UseGuards(JwtAuthGuard) // Protege este endpoint con JWT
   @Get('profile')
+  @Roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER)
   getProfile(@AuthenticatedUser() user: Omit<PrismaUser, 'password'>) {
     // Usa el decorador AuthenticatedUser
     // 'user' ya no contiene la contraseña gracias a JwtStrategy y UserResponseDto (si se usara para devolver)

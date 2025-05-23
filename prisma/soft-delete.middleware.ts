@@ -1,4 +1,3 @@
-// prisma/middleware/soft-delete.middleware.ts
 import { Prisma } from '@prisma/client';
 
 export const softDeleteMiddleware: Prisma.Middleware = async (params, next) => {
