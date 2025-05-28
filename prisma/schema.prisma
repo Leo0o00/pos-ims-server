@@ -2,6 +2,7 @@ generator client {
   provider        = "prisma-client-js"
   // output   = "src/prisma/generated/client"
   previewFeatures = ["typedSql"]
+  // binaryTargets = ["native", "linux-musl"]
 }
 
 datasource db {

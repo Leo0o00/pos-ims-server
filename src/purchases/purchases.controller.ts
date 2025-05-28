@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -18,17 +19,13 @@ import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { MAX_FILE_SIZE } from 'src/products/products.controller';
-import { ProductsService } from 'src/products/products.service';
 import { QueryParamsDto } from 'src/common/dto/query-params.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 
 @Controller('purchases')
 export class PurchasesController {
-  constructor(
-    private readonly purchasesService: PurchasesService,
-    private readonly productsService: ProductsService,
-  ) {}
+  constructor(private readonly purchasesService: PurchasesService) {}
 
   // noinspection TypeScriptValidateTypes
   /**
@@ -46,16 +43,21 @@ export class PurchasesController {
         .addFileTypeValidator({ fileType: /(jpg|jpeg|png|gif)$/ })
         .addMaxSizeValidator({ maxSize: MAX_FILE_SIZE }) // Tamaño maximo de archivo 2MB
         .build({
-          fileIsRequired: false,
+          fileIsRequired: true,
           errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
         }),
     )
-    newProductImages: Array<Express.Multer.File>,
+    images: Array<Express.Multer.File>,
     @Body() createPurchaseDto: CreatePurchaseDto,
   ) {
+    if (images.length !== createPurchaseDto.newProducts?.length) {
+      throw new BadRequestException(
+        'There is a mismatch between the number of images and the number of new products.',
+      );
+    }
     const result = await this.purchasesService.create(
       createPurchaseDto,
-      newProductImages,
+      images,
     );
     return {
       message: 'Purchase successfully created!',

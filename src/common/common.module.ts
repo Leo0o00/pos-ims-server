@@ -4,6 +4,7 @@ import { S3Service } from './s3/s3.service';
 import { EncryptionService } from './encryption/encryption.service';
 import { MediaService } from './media/media.service';
 import { InventoryHelpers } from './helpers/inventory.helpers';
+import { CacheService } from './cache/cache.service';
 
 @Module({
   providers: [
@@ -19,6 +20,7 @@ import { InventoryHelpers } from './helpers/inventory.helpers';
     EncryptionService,
     MediaService,
     InventoryHelpers,
+    CacheService,
   ],
 })
 export class CommonModule {}

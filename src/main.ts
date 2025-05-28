@@ -11,6 +11,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { createValidationExceptionPayload } from './common/utils/validation-error.formatter';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -19,6 +20,7 @@ async function bootstrap() {
     methods: 'GET,PATCH,POST,DELETE',
     credentials: true,
   });
+  app.use(helmet());
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({
@@ -41,6 +43,7 @@ async function bootstrap() {
   app.useGlobalGuards(new RolesGuard(reflector)); // Si lo haces global, JwtAuthGuard debe ir primero
 
   app.useGlobalInterceptors(new APIResponseInterceptor());
+  // app.useGlobalInterceptors(new BigIntSerializerInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
   const config = new DocumentBuilder()
     .setTitle('Point of Sales Inventory Management System API')
@@ -54,5 +57,16 @@ async function bootstrap() {
   const documentFactory = () => SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, documentFactory);
   await app.listen(process.env.PORT ?? 4000);
+  console.log(`Application is running on: ${await app.getUrl()}`);
 }
+//Para resolver el error: "Error: TypeError: Do not know how to serialize a BigInt"
+declare global {
+  interface BigInt {
+    toJSON(): Number;
+  }
+}
+
+BigInt.prototype.toJSON = function () {
+  return Number(this);
+};
 bootstrap();

@@ -1,11 +1,11 @@
 import { Type } from 'class-transformer';
 import {
-  IsString,
+  IsArray,
+  IsDateString,
+  IsNumber,
   IsOptional,
   IsPositive,
-  IsNumber,
-  IsDateString,
-  IsArray,
+  IsString,
   ValidateNested,
 } from 'class-validator';
 
@@ -27,7 +27,8 @@ class UpdatedExistingProductDto {
 
 class DeletedProductDto {
   @IsString() product_id!: string;
-  @IsPositive() @IsNumber() @Type(() => Number) product_quantity!: number; //stock to revert
+  //stock to revert
+  // @IsPositive() @IsNumber() @Type(() => Number) product_quantity!: number;
 }
 
 export class UpdatePurchaseDto {

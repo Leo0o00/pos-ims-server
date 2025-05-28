@@ -3,12 +3,15 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
   Query,
+  Req,
+  UseInterceptors,
 } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -23,12 +26,17 @@ import {
 } from '@nestjs/swagger';
 import { SimpleApiResponse } from 'src/common/dto/simpleApiResponse';
 import { EmployeesResponseDto } from './dto/employees-response.dto';
+import { CacheTTL } from '@nestjs/cache-manager';
+import { HttpCacheInterceptor } from '../common/interceptors/http-cache.interceptor';
 
 @Controller('employees')
+@UseInterceptors(HttpCacheInterceptor)
+@CacheTTL(600000)
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 
   @Post()
+  @HttpCode(HttpStatus.CREATED)
   @Roles(UserRole.ADMIN)
   @ApiCreatedResponse({
     description: 'Employee created successfully.',
@@ -55,8 +63,10 @@ export class EmployeesController {
     type: EmployeesResponseDto,
   })
   async findAll(
+    @Req() req,
     @Query() paginationDto: PaginationDto,
   ): Promise<EmployeesResponseDto> {
+    console.log(req.url);
     const { total, result, meta } = await this.employeesService.findAll(
       paginationDto.page,
       paginationDto.limit,

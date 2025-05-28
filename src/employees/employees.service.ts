@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -8,12 +9,15 @@ import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PaginationService } from 'src/common/pagination/pagination.service';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 
 @Injectable()
 export class EmployeesService {
   constructor(
     private prisma: PrismaService,
     private readonly paginationService: PaginationService,
+    @Inject(CACHE_MANAGER) private cacheService: Cache,
   ) {}
 
   async create(data: CreateEmployeeDto) {
@@ -57,8 +61,6 @@ export class EmployeesService {
           },
         },
       });
-
-      return true;
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
@@ -68,6 +70,8 @@ export class EmployeesService {
         'Unexpected error while creating employee.',
       );
     }
+    await this.cacheService.del('/api/employees/');
+    return true;
   }
 
   async findAll(page = 1, limit = 10) {

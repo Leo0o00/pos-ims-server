@@ -88,6 +88,9 @@ export class PurchasesService {
     }> = [];
     let purchaseRecord: Record<string, string> = {};
 
+    console.log('NewProductsImages from PurchasesService', files);
+    console.log('CreatePurchaseDto from PurchasesService', createPurchaseDto);
+
     try {
       await this.prisma.$transaction(
         async (tx) => {
@@ -169,6 +172,7 @@ export class PurchasesService {
             for (let i = 0; i < createPurchaseDto.newProducts.length; i++) {
               // Este array es para almacenar el producto a crear y pasarselo a metodo create de productService que solo admite arrays de tipo Product.
               const newProductDto: Array<RCreateProductDto> = [];
+              const newProductImage: Express.Multer.File[] = [];
 
               const newProduct = createPurchaseDto.newProducts[i];
               const newProductData = {
@@ -185,10 +189,11 @@ export class PurchasesService {
               };
 
               newProductDto.push(newProductData);
+              newProductImage.push(files[i]);
 
               const createProductResponse = await this.productsService.create(
                 newProductDto,
-                files,
+                newProductImage,
                 'Service',
               );
               if (
@@ -202,12 +207,13 @@ export class PurchasesService {
                   createProductResponse.data.s3UploadedFiles[0],
                 );
               }
+              console.log('CreatedProductsResult', createdProductsResult);
 
               // Registrar la relación en Products_purchases para el nuevo producto.
               await tx.products_purchases.create({
                 data: {
                   purchase_id: purchaseRecord.purchases_id,
-                  product_id: createdProductsResult[0].productId,
+                  product_id: createdProductsResult[i].productId,
                   product_quantity: newProductData.stock_quantity,
                   product_unit_price: newProductData.purchase_price,
                 },
@@ -236,6 +242,23 @@ export class PurchasesService {
             console.error(`Failed to rollback S3 file ${key}:`);
         } catch (s3Error) {
           console.error(`Failed to rollback S3 file ${key}:`, s3Error);
+        }
+      }
+      // Rollback manual de productos creados en BD
+      for (const key of createdProductsResult) {
+        try {
+          // Array para pasarle al metodo remove de product service
+          const fakeIdArrayForDelete: Array<string> = [];
+          fakeIdArrayForDelete.push(key.productId);
+          const deleteResponse =
+            await this.productsService.remove(fakeIdArrayForDelete);
+        } catch (error) {
+          console.error(
+            `Failed to rollback product registre in DB ${key.productId}:`,
+          );
+          throw new InternalServerErrorException(
+            `Failed to rollback product registre in DB ${key.productId}`,
+          );
         }
       }
 
@@ -516,10 +539,25 @@ export class PurchasesService {
         // 4) Eliminar productos de la compra
         if (dto.deletedProducts?.length) {
           for (const d of dto.deletedProducts) {
+            const registryToDelete = await tx.products_purchases.findUnique({
+              where: {
+                purchase_id_product_id: {
+                  purchase_id: uuid,
+                  product_id: d.product_id,
+                },
+              },
+            });
+
+            if (!registryToDelete) {
+              throw new BadRequestException(
+                `Product with id '${d.product_id}' not found in purchases registry.`,
+              );
+            }
+
             await this.inventoryHelpers._applyStockDelta(
               tx,
               d.product_id,
-              -d.product_quantity,
+              -registryToDelete.product_quantity,
             );
 
             await tx.products_purchases.delete({
