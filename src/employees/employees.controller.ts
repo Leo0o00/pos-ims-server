@@ -66,7 +66,7 @@ export class EmployeesController {
     @Req() req,
     @Query() paginationDto: PaginationDto,
   ): Promise<EmployeesResponseDto> {
-    console.log(req.url);
+    console.log(req);
     const { total, result, meta } = await this.employeesService.findAll(
       paginationDto.page,
       paginationDto.limit,
@@ -85,12 +85,14 @@ export class EmployeesController {
   @Get(':uuid')
   @Roles(UserRole.ADMIN, UserRole.MANAGER)
   async findOne(
+    @Req() req,
     @Param(
       'uuid',
       new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.BAD_REQUEST }),
     )
     uuid: string,
   ) {
+    console.log(req);
     const result = await this.employeesService.findOne(uuid);
     return {
       data: result,

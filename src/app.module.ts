@@ -52,7 +52,6 @@ import { CacheableMemory } from 'cacheable';
     UsersModule,
     AuthModule,
     MetricsModule,
-    CacheModule,
   ],
   providers: [
     {
