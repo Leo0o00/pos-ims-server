@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { RCreateProductDto } from './dto/r-create-product.dto';
@@ -16,6 +17,13 @@ import { QueryParamsDto } from '../common/dto/query-params.dto';
 import { mapProductToDto } from './mapper/product.mapper';
 import { MediaService } from 'src/common/media/media.service';
 import { DeletedImagesDto } from './dto/deleted-images.dto';
+import {
+  CACHE_KEYS,
+  CACHE_TTL,
+} from '../common/cache/constants/cache.constants';
+import { CacheService } from '../common/cache/cache.service';
+import { ProductListItemsDto } from './dto/product-list-items.dto';
+import { MetaType } from '../common/types/meta.type';
 
 type Source = 'Service' | 'Request';
 
@@ -42,14 +50,44 @@ type ProductServiceResponseType =
   | RequestFromAntotherServiceResponse
   | RequestFromControllerResponse;
 
+type FindAllProductsResult = {
+  total: number;
+  result: ProductListItemsDto[];
+  meta: MetaType;
+};
+
+type OriginalImagesUrls = {
+  imageOriginalSizeName: string;
+  imageOriginalSizelUrl: string;
+};
+
+type FindOneProductsResult = {
+  product_id: string;
+  branch: string;
+  model: string;
+  description: string;
+  purchase_price: number;
+  stock_quantity: number;
+  amount: number;
+  purchase_date: Date;
+  category_name: string;
+  provider_name: string;
+  pos_name: string;
+  created_at: Date;
+  last_update: Date;
+  imagesUrls: OriginalImagesUrls[];
+};
+
 @Injectable()
 export class ProductsService {
+  private logger = new Logger(ProductsService.name);
   constructor(
     private readonly s3Service: S3Service,
     private readonly media: MediaService,
     private prisma: PrismaService,
     private readonly paginationService: PaginationService,
     private readonly encryptionService: EncryptionService,
+    private readonly cacheService: CacheService,
   ) {}
 
   async create(
@@ -202,6 +240,8 @@ export class ProductsService {
             });
           }
 
+          await this.invalidateProductsListCache();
+
           // 3. Return response
           // Si el origen es 'Service', retornar la respuesta con los datos de los productos creados y las claves de S3.
           if (source && source === 'Service') {
@@ -270,6 +310,33 @@ export class ProductsService {
       minPrice,
       maxPrice,
     } = queryParams;
+
+    //Construir la clave de caché
+    const cacheKey = CACHE_KEYS.PRODUCTS_LIST(
+      page,
+      limit,
+      query,
+      minStock,
+      minPrice,
+      maxPrice,
+    );
+    //Intentar obtener de la caché
+    try {
+      const cachedProducts =
+        await this.cacheService.get<FindAllProductsResult>(cacheKey);
+      if (cachedProducts) {
+        this.logger.log(
+          `Returning paged Products Categories list from cache for key: ${cacheKey}`,
+        );
+        return cachedProducts;
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error accessing the cache for the key: ${cacheKey}: `,
+        error,
+      );
+    }
+
     let filters: Array<Record<string, Filters>> = [];
 
     if (query) {
@@ -315,12 +382,24 @@ export class ProductsService {
         take: limit,
       });
 
-      const result = await Promise.all(
+      const result: ProductListItemsDto[] = await Promise.all(
         raw.map((p) => mapProductToDto(p, this.s3Service)),
       );
 
       const total = await this.prisma.products.count({ where });
-      const meta = this.paginationService.getPaginationMeta(page, limit, total);
+      const meta: MetaType = this.paginationService.getPaginationMeta(
+        page,
+        limit,
+        total,
+      );
+
+      //Guardar en caché antes de retornar
+      await this.cacheService.setWithLogMessage(
+        cacheKey,
+        { total, result, meta },
+        CACHE_TTL.EIGHT_HOURS,
+        'Products list',
+      );
 
       return {
         total,
@@ -336,6 +415,22 @@ export class ProductsService {
   }
 
   async findOne(uuid: string) {
+    const cacheKey = CACHE_KEYS.PRODUCT_BY_ID(uuid);
+
+    try {
+      const cachedProduct =
+        await this.cacheService.get<FindOneProductsResult>(cacheKey);
+      if (cachedProduct) {
+        this.logger.log(`Returning product from cache for product ID: ${uuid}`);
+        return cachedProduct;
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error accessing cache for product ID ${uuid}: `,
+        error,
+      );
+    }
+
     try {
       const product = await this.prisma.products.findFirst({
         select: {
@@ -363,10 +458,7 @@ export class ProductsService {
         throw new NotFoundException('Product not found with the provided id.');
       }
 
-      const imagesUrls: Array<{
-        imageOriginalSizeName: string;
-        imageOriginalSizelUrl: string;
-      }> = [];
+      const imagesUrls: Array<OriginalImagesUrls> = [];
 
       if (product.img.length > 0) {
         for (const img of product.img) {
@@ -380,14 +472,14 @@ export class ProductsService {
         }
       }
 
-      return {
+      const productDetailCurated: FindOneProductsResult = {
         product_id: product.product_id,
         branch: product.branch,
         model: product.model,
         description: product.description,
-        purchase_price: product.purchase_price,
+        purchase_price: Number(product.purchase_price),
         stock_quantity: product.stock_quantity,
-        amount: product.amount,
+        amount: Number(product.amount),
         purchase_date: product.purchase_date,
         category_name: product.category_name,
         provider_name: product.provider_name,
@@ -396,6 +488,15 @@ export class ProductsService {
         last_update: product.last_update,
         imagesUrls,
       };
+
+      await this.cacheService.setWithLogMessage(
+        cacheKey,
+        productDetailCurated,
+        CACHE_TTL.EIGHT_HOURS,
+        'Product details',
+      );
+
+      return productDetailCurated;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -554,6 +655,9 @@ export class ProductsService {
             }
           }
 
+          await this.invalidateProductsCacheById(uuid);
+          await this.invalidateProductsListCache();
+
           return true;
         },
         {
@@ -637,6 +741,14 @@ export class ProductsService {
             }),
           );
 
+          await Promise.all(
+            uuid.map(async (id) => {
+              await this.invalidateProductsCacheById(id);
+            }),
+          );
+
+          await this.invalidateProductsListCache();
+
           return true;
         },
         {
@@ -664,4 +776,28 @@ export class ProductsService {
   }
 
   //TODO: Implementar soft delete
+
+  async invalidateProductsCacheById(uuid: string) {
+    const cacheKeyIndividual = CACHE_KEYS.PRODUCT_BY_ID(uuid);
+    try {
+      const deleteResult = await this.cacheService.del(cacheKeyIndividual);
+      if (!deleteResult) {
+        this.logger.log(`Individual cache not found for Products ID: ${uuid}`);
+        return;
+      }
+      this.logger.log(`Individual cache invalidated for Products ID: ${uuid}`);
+    } catch (error) {
+      this.logger.error(
+        `Error invalidating individual cache for Products ID ${uuid}: `,
+        error,
+      );
+    }
+  }
+
+  async invalidateProductsListCache() {
+    await this.cacheService.invalidateListCacheByPattern(
+      'products:list',
+      'Products',
+    );
+  }
 }

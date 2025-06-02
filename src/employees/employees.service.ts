@@ -9,7 +9,10 @@ import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PaginationService } from 'src/common/pagination/pagination.service';
-import { CACHE_KEYS, CACHE_TTL } from '../common/constants/cache.constants';
+import {
+  CACHE_KEYS,
+  CACHE_TTL,
+} from '../common/cache/constants/cache.constants';
 import { CacheService } from '../common/cache/cache.service';
 import { MetaType } from '../common/types/meta.type';
 
@@ -125,7 +128,7 @@ export class EmployeesService {
         await this.cacheService.get<FindAllEmployeeResult>(cacheKey);
       if (cachedEmployees) {
         this.logger.log(
-          `Returning paged employees from cache for key: ${cacheKey}`,
+          `Returning paged employees list from cache for key: ${cacheKey}`,
         );
         return cachedEmployees;
       }
@@ -146,7 +149,7 @@ export class EmployeesService {
         skip: (page - 1) * limit,
         take: limit,
       });
-      const total = await this.prisma.employees.count();
+      const total: number = await this.prisma.employees.count();
       const meta: MetaType = this.paginationService.getPaginationMeta(
         page,
         limit,
@@ -154,16 +157,12 @@ export class EmployeesService {
       );
 
       //Guardar en caché antes de retornar
-      try {
-        await this.cacheService.set(
-          cacheKey,
-          { total, result, meta },
-          CACHE_TTL.EIGHT_HOURS,
-        );
-        this.logger.log(`Paged employees cached for the key: ${cacheKey}`);
-      } catch (error) {
-        this.logger.error(`Error while caching for $ key{cacheKey}: `, error);
-      }
+      await this.cacheService.setWithLogMessage(
+        cacheKey,
+        { total, result, meta },
+        CACHE_TTL.EIGHT_HOURS,
+        'Employees list',
+      );
 
       return {
         total,
@@ -226,16 +225,12 @@ export class EmployeesService {
         last_update: existingEmployee.last_update,
       };
 
-      try {
-        await this.cacheService.set(
-          cacheKey,
-          curatedEmployeeResult,
-          CACHE_TTL.EIGHT_HOURS,
-        ); // Ejemplo: TTL de 1 hora
-        this.logger.log(`Employee ID: ${uuid} cached.`);
-      } catch (error) {
-        this.logger.error(`Error caching for employee ID ${uuid}: `, error);
-      }
+      await this.cacheService.setWithLogMessage(
+        cacheKey,
+        curatedEmployeeResult,
+        CACHE_TTL.EIGHT_HOURS,
+        'Employee details',
+      );
 
       return curatedEmployeeResult;
     } catch (error) {
@@ -314,7 +309,7 @@ export class EmployeesService {
         },
       });
 
-      const curatedEmployeeResult = {
+      const curatedEmployeeResult: EmployeeDetail = {
         employee_id: updatedEmployee.employee_id,
         CID: updatedEmployee.CID,
         first_name: updatedEmployee.first_name,
@@ -323,7 +318,7 @@ export class EmployeesService {
         phone_number: updatedEmployee.phone_number,
         img: updatedEmployee.img,
         pos_name: updatedEmployee.pos_name,
-        salary_amount: updatedEmployee.salary?.amount,
+        salary_amount: Number(updatedEmployee.salary?.amount),
         payment_date: updatedEmployee.salary?.date,
         created_at: updatedEmployee.created_at,
         last_update: updatedEmployee.last_update,
@@ -399,11 +394,15 @@ export class EmployeesService {
   async invalidateEmployeesCacheById(uuid: string) {
     const cacheKeyIndividual = CACHE_KEYS.EMPLOYEES_BY_ID(uuid);
     try {
-      await this.cacheService.del(cacheKeyIndividual);
-      this.logger.log(`Caché individual invalidada para empleado ID: ${uuid}`);
+      const deleteResult = await this.cacheService.del(cacheKeyIndividual);
+      if (!deleteResult) {
+        this.logger.log(`Individual cache not found for employee ID: ${uuid}`);
+        return;
+      }
+      this.logger.log(`Individual cache invalidated for employee ID: ${uuid}`);
     } catch (error) {
       this.logger.error(
-        `Error al invalidar caché individual para empleado ID ${uuid}: `,
+        `Error invalidating individual cache for employee ID ${uuid}: `,
         error,
       );
     }

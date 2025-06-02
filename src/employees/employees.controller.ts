@@ -25,11 +25,10 @@ import {
 } from '@nestjs/swagger';
 import { SimpleApiResponse } from 'src/common/dto/simpleApiResponse';
 import { EmployeesResponseDto } from './dto/employees-response.dto';
-import { CacheTTL } from '@nestjs/cache-manager';
 
 @Controller('employees')
 // @UseInterceptors(HttpCacheInterceptor)
-@CacheTTL(600000)
+// @CacheTTL(600000)
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 
@@ -64,7 +63,7 @@ export class EmployeesController {
     @Req() req,
     @Query() paginationDto: PaginationDto,
   ): Promise<EmployeesResponseDto> {
-    // console.log(req);
+    console.log(req);
     const { total, result, meta } = await this.employeesService.findAll(
       paginationDto.page,
       paginationDto.limit,
@@ -90,7 +89,7 @@ export class EmployeesController {
     )
     uuid: string,
   ) {
-    // console.log(req);
+    console.log(req);
     const result = await this.employeesService.findOne(uuid);
     return {
       data: result,

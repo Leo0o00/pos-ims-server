@@ -5,13 +5,22 @@ import { Cache } from 'cache-manager';
 interface CacheServiceInterface {
   get<T>(key: string): Promise<T | null>;
 
+  getWithLogMessage<T>(key: string, serviceCaller: string): Promise<T | null>;
+
   set<T>(key: string, value: any, ttl?: number): Promise<T>;
+
+  setWithLogMessage<T>(
+    key: string,
+    value: any,
+    ttl?: number,
+    serviceCaller?: string,
+  ): Promise<T | null>;
 
   del(key: string): Promise<boolean>;
 
   mdel(key: string[]): Promise<boolean>;
 
-  delByPattern(key: string): Promise<any>;
+  // delByPattern(key: string): Promise<any>;
 
   /**
    * Invalida todas las cachés cuyas keys coincidan con el patron del parametro.
@@ -20,7 +29,7 @@ interface CacheServiceInterface {
    */
   invalidateListCacheByPattern(
     keysPattern: string, // Patrón para claves de empleados paginados
-    ServiceOwner: string,
+    serviceCaller: string,
   ): Promise<void>;
 }
 
@@ -30,11 +39,34 @@ export class CacheService implements CacheServiceInterface {
 
   constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) {}
 
+  async getWithLogMessage<T>(
+    key: string,
+    serviceCaller: string,
+  ): Promise<T | null> {
+    throw new Error('Method not implemented.');
+  }
+
+  async setWithLogMessage<T>(
+    key: string,
+    value: T,
+    ttl?: number,
+    serviceCaller = '',
+  ): Promise<T | null> {
+    try {
+      const cacheResult: T = await this.cacheManager.set(key, value, ttl);
+      this.logger.log(`${serviceCaller} result cached for the key: ${key}`);
+      return cacheResult;
+    } catch (error) {
+      this.logger.error(`Error while caching for ${key}: `, error);
+      return null;
+    }
+  }
+
   async get<T>(key: string): Promise<T | null> {
     return await this.cacheManager.get<T>(key);
   }
 
-  async set<T>(key: string, value: any, ttl?: number): Promise<T> {
+  async set<T>(key: string, value: T, ttl?: number): Promise<T> {
     return await this.cacheManager.set<T>(key, value, ttl);
   }
 
@@ -47,7 +79,7 @@ export class CacheService implements CacheServiceInterface {
   }
 
   // TODO: Implementar esto luego si hiciera falta
-  async delByPattern(key: string): Promise<any> {}
+  // async delByPattern(key: string): Promise<any> {}
 
   /**
    * Invalida todas las cachés cuyas keys coincidan con el patron del parametro.
@@ -56,16 +88,16 @@ export class CacheService implements CacheServiceInterface {
    */
   async invalidateListCacheByPattern(
     keysPattern: string, // Patrón para claves de empleados paginados
-    ServiceOwner: string,
+    serviceCaller: string,
   ) {
     this.logger.log(
-      `Attempting to invalidate ${ServiceOwner} listing caches...`,
+      `Attempting to invalidate ${serviceCaller} listing caches...`,
     );
     try {
       const keysToDelete: string[] = [];
 
       // @ts-ignore
-      for await (const [key, value] of this.cacheManager.stores[1].iterator()) {
+      for await (const [key] of this.cacheManager.stores[1].iterator()) {
         const KEY: string = key;
         if (KEY.startsWith(keysPattern, 0)) {
           keysToDelete.push(KEY);
@@ -87,7 +119,7 @@ export class CacheService implements CacheServiceInterface {
       }
     } catch (error) {
       this.logger.error(
-        `General error when trying to invalidate the ${ServiceOwner} listing cache:`,
+        `General error when trying to invalidate the ${serviceCaller} listing cache:`,
         error,
       );
     }
