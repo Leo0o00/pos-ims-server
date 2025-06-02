@@ -1,23 +1,63 @@
 import {
   BadRequestException,
-  Inject,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PaginationService } from 'src/common/pagination/pagination.service';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import { CACHE_KEYS, CACHE_TTL } from '../common/constants/cache.constants';
+import { CacheService } from '../common/cache/cache.service';
+import { MetaType } from '../common/types/meta.type';
+
+type EmployeesQueryResult = {
+  address: string;
+  img: string | null;
+  created_at: Date;
+  last_update: Date;
+  employee_id: string;
+  CID: string;
+  first_name: string;
+  last_name: string;
+  phone_number: string | null;
+  pos_name: string;
+  deleted_at: Date | null;
+};
+
+type EmployeeList = EmployeesQueryResult[];
+
+type FindAllEmployeeResult = {
+  result: EmployeeList;
+  total: number;
+  meta: MetaType;
+};
+
+type EmployeeDetail = {
+  employee_id: string;
+  CID: string;
+  first_name: string;
+  last_name: string;
+  address: string;
+  phone_number: string | null;
+  img: string | null;
+  pos_name: string;
+  salary_amount: number | undefined;
+  payment_date: Date | undefined;
+  created_at: Date;
+  last_update: Date;
+};
 
 @Injectable()
 export class EmployeesService {
+  private readonly logger = new Logger(EmployeesService.name);
+
   constructor(
     private prisma: PrismaService,
     private readonly paginationService: PaginationService,
-    @Inject(CACHE_MANAGER) private cacheService: Cache,
+    private readonly cacheService: CacheService,
   ) {}
 
   async create(data: CreateEmployeeDto) {
@@ -70,18 +110,60 @@ export class EmployeesService {
         'Unexpected error while creating employee.',
       );
     }
-    await this.cacheService.del('/api/employees/');
+    // Invalidación de caché después de crear
+    await this.invalidateEmployeesListCache(); // Método para invalidar cachés de listas
+
     return true;
   }
 
   async findAll(page = 1, limit = 10) {
+    //Construir la clave de caché
+    const cacheKey = CACHE_KEYS.EMPLOYEES_LIST(page, limit);
+    //Intentar obtener de la caché
     try {
-      const result = await this.prisma.employees.findMany({
+      const cachedEmployees =
+        await this.cacheService.get<FindAllEmployeeResult>(cacheKey);
+      if (cachedEmployees) {
+        this.logger.log(
+          `Returning paged employees from cache for key: ${cacheKey}`,
+        );
+        return cachedEmployees;
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error accessing the cache for the key: ${cacheKey}: `,
+        error,
+      );
+    }
+
+    //Si no está en caché (cache miss), obtener de la BD
+    // this.logger.log(
+    //   `Cache miss para empleados paginados con clave: ${cacheKey}. Obteniendo de BD.`,
+    // );
+
+    try {
+      const result: EmployeeList = await this.prisma.employees.findMany({
         skip: (page - 1) * limit,
         take: limit,
       });
       const total = await this.prisma.employees.count();
-      const meta = this.paginationService.getPaginationMeta(page, limit, total);
+      const meta: MetaType = this.paginationService.getPaginationMeta(
+        page,
+        limit,
+        total,
+      );
+
+      //Guardar en caché antes de retornar
+      try {
+        await this.cacheService.set(
+          cacheKey,
+          { total, result, meta },
+          CACHE_TTL.EIGHT_HOURS,
+        );
+        this.logger.log(`Paged employees cached for the key: ${cacheKey}`);
+      } catch (error) {
+        this.logger.error(`Error while caching for $ key{cacheKey}: `, error);
+      }
 
       return {
         total,
@@ -95,6 +177,26 @@ export class EmployeesService {
   }
 
   async findOne(uuid: string) {
+    const cacheKey = CACHE_KEYS.EMPLOYEES_BY_ID(uuid);
+
+    try {
+      const cachedEmployee =
+        await this.cacheService.get<EmployeeDetail>(cacheKey);
+      if (cachedEmployee) {
+        this.logger.log(
+          `Returning employee from cache for employee ID: ${uuid}`,
+        );
+        return cachedEmployee;
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error accessing cache for employee ID ${uuid}: `,
+        error,
+      );
+    }
+
+    // this.logger.log(`Cache miss para empleado ID: ${uuid}. Obteniendo de BD.`);
+
     try {
       const existingEmployee = await this.prisma.employees.findFirst({
         where: {
@@ -109,7 +211,7 @@ export class EmployeesService {
         throw new NotFoundException('Employee not found with the provided id.');
       }
 
-      return {
+      const curatedEmployeeResult: EmployeeDetail = {
         employee_id: existingEmployee.employee_id,
         CID: existingEmployee.CID,
         first_name: existingEmployee.first_name,
@@ -118,11 +220,24 @@ export class EmployeesService {
         phone_number: existingEmployee.phone_number,
         img: existingEmployee.img,
         pos_name: existingEmployee.pos_name,
-        salary_amount: existingEmployee.salary?.amount,
+        salary_amount: Number(existingEmployee.salary?.amount),
         payment_date: existingEmployee.salary?.date,
         created_at: existingEmployee.created_at,
         last_update: existingEmployee.last_update,
       };
+
+      try {
+        await this.cacheService.set(
+          cacheKey,
+          curatedEmployeeResult,
+          CACHE_TTL.EIGHT_HOURS,
+        ); // Ejemplo: TTL de 1 hora
+        this.logger.log(`Employee ID: ${uuid} cached.`);
+      } catch (error) {
+        this.logger.error(`Error caching for employee ID ${uuid}: `, error);
+      }
+
+      return curatedEmployeeResult;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -198,7 +313,8 @@ export class EmployeesService {
           },
         },
       });
-      return {
+
+      const curatedEmployeeResult = {
         employee_id: updatedEmployee.employee_id,
         CID: updatedEmployee.CID,
         first_name: updatedEmployee.first_name,
@@ -212,6 +328,13 @@ export class EmployeesService {
         created_at: updatedEmployee.created_at,
         last_update: updatedEmployee.last_update,
       };
+
+      // Invalidación de caché después de actualizar
+      await this.invalidateEmployeesCacheById(uuid);
+
+      await this.invalidateEmployeesListCache();
+
+      return curatedEmployeeResult;
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
@@ -243,7 +366,7 @@ export class EmployeesService {
         throw new NotFoundException('Employee not found with the provided id.');
       }
 
-      this.prisma.$transaction(async (tx) => {
+      await this.prisma.$transaction(async (tx) => {
         await tx.salary.delete({
           where: {
             employee_cid: existingEmployee.CID,
@@ -256,6 +379,11 @@ export class EmployeesService {
         });
       });
 
+      // Invalidación de caché después de eliminar
+      await this.invalidateEmployeesCacheById(uuid);
+
+      await this.invalidateEmployeesListCache();
+
       return true;
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -266,5 +394,25 @@ export class EmployeesService {
         'Unexpected error while deleting employee.',
       );
     }
+  }
+
+  async invalidateEmployeesCacheById(uuid: string) {
+    const cacheKeyIndividual = CACHE_KEYS.EMPLOYEES_BY_ID(uuid);
+    try {
+      await this.cacheService.del(cacheKeyIndividual);
+      this.logger.log(`Caché individual invalidada para empleado ID: ${uuid}`);
+    } catch (error) {
+      this.logger.error(
+        `Error al invalidar caché individual para empleado ID ${uuid}: `,
+        error,
+      );
+    }
+  }
+
+  async invalidateEmployeesListCache() {
+    await this.cacheService.invalidateListCacheByPattern(
+      'employees:list',
+      'Employee',
+    );
   }
 }
