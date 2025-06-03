@@ -16,6 +16,20 @@ import { PaginationService } from 'src/common/pagination/pagination.service';
 import { ProductsSold } from './types/products-sold.type';
 import { S3Service } from 'src/common/s3/s3.service';
 import { Prisma } from '@prisma/client';
+import {
+  CACHE_KEYS,
+  CACHE_TTL,
+} from '../common/cache/constants/cache.constants';
+import { CacheService } from 'src/common/cache/cache.service';
+import { MetaType } from '../common/types/meta.type';
+
+type SaleDetails = {
+  sale_id: string;
+  sale_date: Date;
+  products_sold: ProductsSold[];
+  created_at: Date;
+  last_update: Date;
+};
 
 @Injectable()
 export class SalesService {
@@ -26,6 +40,7 @@ export class SalesService {
     private readonly inventoryHelpers: InventoryHelpers,
     private readonly paginationService: PaginationService,
     private readonly s3Service: S3Service,
+    private cacheService: CacheService,
   ) {}
 
   /** -------------------- CREATE -------------------- */
@@ -61,6 +76,8 @@ export class SalesService {
         // 4) calcular total
         await this.inventoryHelpers._recalcTotal(tx, sale.sales_id);
 
+        await this.invalidateSalesListCache();
+
         return sale.sales_id;
       });
     } catch (error) {
@@ -78,7 +95,7 @@ export class SalesService {
    * Lista todas las ventas
    * Nota: Las ventas que esten marcadas como eliminadas no seran listadas
    *
-   * @param queryParams
+   * @param query
    */
   async findAll(query: SalesQueryDto) {
     const {
@@ -92,6 +109,33 @@ export class SalesService {
       includeDeleted,
     } = query;
 
+    //Construir la clave de caché
+    const cacheKey = CACHE_KEYS.SALES_LIST(
+      page,
+      limit,
+      q,
+      dateFrom,
+      dateTo,
+      minTotal,
+      maxTotal,
+      includeDeleted,
+    );
+    //Intentar obtener de la caché
+    try {
+      const cachedSales = await this.cacheService.get(cacheKey);
+      if (cachedSales) {
+        this.logger.log(
+          `Returning paged Sales list from cache for key: ${cacheKey}`,
+        );
+        return cachedSales;
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error accessing the cache for the key: ${cacheKey}: `,
+        error,
+      );
+    }
+
     /* ----- where dinámico ----- */
     const where: Prisma.SalesWhereInput = {
       AND: [
@@ -104,6 +148,7 @@ export class SalesService {
       ],
     };
 
+    // TODO: Sanitizar esta consulta para que retorne la data en una estructura mas coherente
     /* consulta principal */
     const result = await this.prisma.sales.findMany({
       where,
@@ -114,11 +159,23 @@ export class SalesService {
       orderBy: { created_at: 'desc' },
       skip: (page - 1) * limit,
       take: limit,
-    }); // usa findMany + include _count para eficiencia :contentReference[oaicite:3]{index=3}
+    }); // usa findMany + include _count para eficiencia
 
     /* total global con filtros */
-    const total = await this.prisma.sales.count({ where }); // accurate count :contentReference[oaicite:4]{index=4}
-    const meta = this.paginationService.getPaginationMeta(page, limit, total); // igual que Purchases
+    const total = await this.prisma.sales.count({ where });
+    const meta: MetaType = this.paginationService.getPaginationMeta(
+      page,
+      limit,
+      total,
+    );
+
+    //Guardar en caché antes de retornar
+    await this.cacheService.setWithLogMessage(
+      cacheKey,
+      { total, result, meta },
+      CACHE_TTL.EIGHT_HOURS,
+      'Sales List',
+    );
 
     return { total, result, meta };
   }
@@ -131,6 +188,18 @@ export class SalesService {
    * @param id Id de la venta a buscar
    */
   async findOne(id: string) {
+    const cacheKey = CACHE_KEYS.SALES_BY_ID(id);
+
+    try {
+      const cachedSale = await this.cacheService.get<SaleDetails>(cacheKey);
+      if (cachedSale) {
+        this.logger.log(`Returning purchase from cache for sale ID: ${id}`);
+        return cachedSale;
+      }
+    } catch (error) {
+      this.logger.error(`Error accessing cache for sale ID ${id}: `, error);
+    }
+
     try {
       const products_sold: Array<ProductsSold> = [];
 
@@ -207,13 +276,22 @@ export class SalesService {
         );
       }
 
-      return {
+      const saleDetails: SaleDetails = {
         sale_id: sale?.sales_id,
         sale_date: sale?.date,
         products_sold,
         created_at: sale?.created_at,
         last_update: sale?.last_update,
       };
+
+      await this.cacheService.setWithLogMessage(
+        cacheKey,
+        saleDetails,
+        CACHE_TTL.EIGHT_HOURS,
+        'Sale details',
+      );
+
+      return saleDetails;
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
 
@@ -329,6 +407,12 @@ export class SalesService {
         }
 
         await this.inventoryHelpers._recalcTotal(tx, id);
+
+        // Invalidación de caché después de actualizar
+        await this.invalidateSalesCacheById(id);
+
+        await this.invalidateSalesListCache();
+
         return id;
       });
     } catch (error) {
@@ -369,6 +453,12 @@ export class SalesService {
           );
         }
         await tx.sales.delete({ where: { sales_id: id } }); // middleware → soft
+
+        // Invalidación de caché después de actualizar
+        await this.invalidateSalesCacheById(id);
+
+        await this.invalidateSalesListCache();
+
         return true;
       });
     } catch (error) {
@@ -389,7 +479,7 @@ export class SalesService {
   //TODO: Implementar una extension de prisma para que solo los usuarios con este rol puedan restaurar un registro de venta eliminado
   /** -------------------- RESTORE -------------------- */
   /**
-   * Restaura un venta que ha sido eliminada previamente.
+   * Restaura una venta que ha sido eliminada previamente.
    *
    * @param id Id de la venta a actualizar
    */
@@ -417,6 +507,11 @@ export class SalesService {
           where: { sales_id: id },
           data: { deleted_at: null },
         });
+
+        // Invalidación de caché después de actualizar
+
+        await this.invalidateSalesListCache();
+
         return id;
       });
     } catch (error) {
@@ -461,5 +556,26 @@ export class SalesService {
         total_price: item.unit_price * item.quantity,
       },
     });
+  }
+
+  async invalidateSalesCacheById(uuid: string) {
+    const cacheKeyIndividual = CACHE_KEYS.SALES_BY_ID(uuid);
+    try {
+      const deleteResult = await this.cacheService.del(cacheKeyIndividual);
+      if (!deleteResult) {
+        this.logger.log(`Individual cache not found for Sales ID: ${uuid}`);
+        return;
+      }
+      this.logger.log(`Individual cache invalidated for Sales ID: ${uuid}`);
+    } catch (error) {
+      this.logger.error(
+        `Error invalidating individual cache for Sales ID ${uuid}: `,
+        error,
+      );
+    }
+  }
+
+  async invalidateSalesListCache() {
+    await this.cacheService.invalidateListCacheByPattern('sales:list', 'Sales');
   }
 }

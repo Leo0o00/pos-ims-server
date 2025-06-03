@@ -17,6 +17,38 @@ import { PurchasesResult } from './types/purchase-result.type';
 import { PaginationService } from 'src/common/pagination/pagination.service';
 import { ProductsPurchased } from './types/products-purchased.type';
 import { InventoryHelpers } from 'src/common/helpers/inventory.helpers';
+import {
+  CACHE_KEYS,
+  CACHE_TTL,
+} from '../common/cache/constants/cache.constants';
+import { CacheService } from '../common/cache/cache.service';
+import { MetaType } from '../common/types/meta.type';
+
+type PurchasesQueryResult = {
+  purchase_id: string;
+  purchase_date: string;
+  total_products_purchased: number;
+  total_stocks_added: number;
+  total_invested: number;
+  created_at: string;
+  last_update: string;
+};
+
+type PurchasesList = PurchasesQueryResult[];
+
+type FindAllPurchasesResult = {
+  result: PurchasesList;
+  total: number;
+  meta: MetaType;
+};
+
+type PurchaseDetail = {
+  purchases_id: string;
+  purchase_date: Date;
+  products_purchased: ProductsPurchased[];
+  created_at: Date;
+  last_update: Date;
+};
 
 /**
  * Servicio que gestiona las operaciones de compra de inventario de forma atómica.
@@ -33,6 +65,7 @@ export class PurchasesService {
     private readonly productsService: ProductsService,
     private readonly paginationService: PaginationService,
     private readonly inventoryHelpers: InventoryHelpers,
+    private cacheService: CacheService,
   ) {}
 
   // ---------- CREATE ----------
@@ -228,6 +261,8 @@ export class PurchasesService {
         },
       );
 
+      await this.invalidatePurchasesListCache();
+
       return {
         purchaseId: purchaseRecord.purchases_id,
         updatedProducts,
@@ -286,7 +321,27 @@ export class PurchasesService {
   // ---------- FINDALL ----------
   async findAll(queryParams: QueryParamsDto) {
     const { limit = 10, page = 1 } = queryParams;
-    const result: Array<PurchasesResult> = [];
+
+    //Construir la clave de caché
+    const cacheKey = CACHE_KEYS.PURCHASES_LIST(page, limit);
+    //Intentar obtener de la caché
+    try {
+      const cachedPurchases =
+        await this.cacheService.get<FindAllPurchasesResult>(cacheKey);
+      if (cachedPurchases) {
+        this.logger.log(
+          `Returning paged Purchases list from cache for key: ${cacheKey}`,
+        );
+        return cachedPurchases;
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error accessing the cache for the key: ${cacheKey}: `,
+        error,
+      );
+    }
+
+    const result: PurchasesList = [];
 
     try {
       const purchases = await this.prisma.purchases.findMany({
@@ -343,8 +398,20 @@ export class PurchasesService {
       );
     }
 
-    const total = await this.prisma.purchases.count();
-    const meta = this.paginationService.getPaginationMeta(page, limit, total);
+    const total: number = await this.prisma.purchases.count();
+    const meta: MetaType = this.paginationService.getPaginationMeta(
+      page,
+      limit,
+      total,
+    );
+
+    //Guardar en caché antes de retornar
+    await this.cacheService.setWithLogMessage(
+      cacheKey,
+      { total, result, meta },
+      CACHE_TTL.EIGHT_HOURS,
+      'Purchases List',
+    );
 
     return {
       total,
@@ -355,6 +422,19 @@ export class PurchasesService {
 
   // ---------- FINDONE ----------
   async findOne(uuid: string) {
+    const cacheKey = CACHE_KEYS.PURCHASES_BY_ID(uuid);
+
+    try {
+      const cachedPurchase =
+        await this.cacheService.get<PurchaseDetail>(cacheKey);
+      if (cachedPurchase) {
+        this.logger.log(`Returning purchase from cache for sale ID: ${uuid}`);
+        return cachedPurchase;
+      }
+    } catch (error) {
+      this.logger.error(`Error accessing cache for sale ID ${uuid}: `, error);
+    }
+
     try {
       const products_purchased: Array<ProductsPurchased> = [];
 
@@ -439,13 +519,22 @@ export class PurchasesService {
         );
       }
 
-      return {
+      const purchaseDetail: PurchaseDetail = {
         purchases_id: purchase?.purchases_id,
         purchase_date: purchase?.purchase_date,
         products_purchased,
         created_at: purchase?.created_at,
         last_update: purchase?.last_update,
       };
+
+      await this.cacheService.setWithLogMessage(
+        cacheKey,
+        purchaseDetail,
+        CACHE_TTL.EIGHT_HOURS,
+        'Purchase details',
+      );
+
+      return purchaseDetail;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -571,7 +660,7 @@ export class PurchasesService {
           }
         }
 
-        /* 5) Si sólo cambió la fecha, sincronizar el resto de productos no tocados */
+        /* 5) Si solo cambió la fecha, sincronizar el resto de productos no tocados */
         if (newPurchaseDate) {
           for (const rel of purchase.products_purchases) {
             /* Evitar repetir los que ya ajustamos arriba */
@@ -596,6 +685,12 @@ export class PurchasesService {
         }
 
         this.logger.log(`Purchase ${uuid} updated`);
+
+        // Invalidación de caché después de actualizar
+        await this.invalidatePurchasesCacheById(uuid);
+
+        await this.invalidatePurchasesListCache();
+
         return { message: 'Purchase updated successfully.', purchase_id: uuid };
       });
     } catch (error) {
@@ -636,6 +731,12 @@ export class PurchasesService {
         await tx.purchases.delete({ where: { purchases_id: uuid } });
 
         this.logger.warn(`Purchase ${uuid} deleted`);
+
+        // Invalidación de caché después de actualizar
+        await this.invalidatePurchasesCacheById(uuid);
+
+        await this.invalidatePurchasesListCache();
+
         return true;
       });
     } catch (error) {
@@ -649,4 +750,28 @@ export class PurchasesService {
   }
 
   //TODO: Implementar soft delete
+
+  async invalidatePurchasesCacheById(uuid: string) {
+    const cacheKeyIndividual = CACHE_KEYS.PURCHASES_BY_ID(uuid);
+    try {
+      const deleteResult = await this.cacheService.del(cacheKeyIndividual);
+      if (!deleteResult) {
+        this.logger.log(`Individual cache not found for Purchases ID: ${uuid}`);
+        return;
+      }
+      this.logger.log(`Individual cache invalidated for Purchases ID: ${uuid}`);
+    } catch (error) {
+      this.logger.error(
+        `Error invalidating individual cache for Purchases ID ${uuid}: `,
+        error,
+      );
+    }
+  }
+
+  async invalidatePurchasesListCache() {
+    await this.cacheService.invalidateListCacheByPattern(
+      'purchases:list',
+      'Purchases',
+    );
+  }
 }

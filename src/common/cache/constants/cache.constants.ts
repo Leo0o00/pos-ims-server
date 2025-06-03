@@ -18,7 +18,37 @@ export const CACHE_KEYS = {
     maxPrice?: number,
   ) =>
     `products:list:page=${page}:limit=${limit}:query=${query || 'none'}:minStock=${minStock || 'none'}:minPrice=${minPrice || 'none'}:maxPrice=${maxPrice || 'none'}`,
-  PRODUCT_BY_ID: (id: string) => `product:item:${id}`,
+  PRODUCT_BY_ID: (id: string) => `products:item:${id}`,
+  PROVIDERS_BY_ID: (id: string) => `providers:item:${id}`,
+  PROVIDERS_LIST: (page: number, limit: number, query?: string) =>
+    `providers:list:page=${page}:limit=${limit}:query=${query || 'none'}`,
+  PURCHASES_BY_ID: (id: string) => `purchases:item:${id}`,
+  PURCHASES_LIST: (page: number, limit: number, query?: string) =>
+    `purchases:list:page=${page}:limit=${limit}:query=${query || 'none'}`,
+  SALES_BY_ID: (id: string) => `sales:item:${id}`,
+  SALES_LIST: (
+    page: number,
+    limit: number,
+    query?: string,
+    dateFrom?: string,
+    dateTo?: string,
+    minTotal?: number,
+    maxTotal?: number,
+    includeDeleted?: boolean,
+  ) =>
+    `sales:list:page=${page}:limit=${limit}:query=${query || 'none'}:dateFrom=${dateFrom || 'none'}:dateTo=${dateTo || 'none'}:minTotal=${minTotal || 'none'}:maxTotal=${maxTotal || 'none'}:includeDeleted=${includeDeleted || 'none'}`,
+  USERS_BY_ID: (id: string) => `users:item:${id}`,
+  USERS_LIST: (
+    page: number,
+    limit: number,
+    query?: string,
+    dateFrom?: string,
+    dateTo?: string,
+    minTotal?: number,
+    maxTotal?: number,
+    includeDeleted?: boolean,
+  ) =>
+    `users:list:page=${page}:limit=${limit}:query=${query || 'none'}:dateFrom=${dateFrom || 'none'}:dateTo=${dateTo || 'none'}:minTotal=${minTotal || 'none'}:maxTotal=${maxTotal || 'none'}:includeDeleted=${includeDeleted || 'none'}`,
   // Añade más claves según necesites
 };
 

@@ -1,21 +1,28 @@
 // src/users/users.service.ts
 import {
-  Injectable,
-  NotFoundException,
-  ConflictException,
-  InternalServerErrorException,
   BadRequestException,
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt'; // Cambiado a bcryptjs para evitar problemas de compatibilidad
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Prisma, User } from '@prisma/client';
+import { CACHE_KEYS } from '../common/cache/constants/cache.constants';
+import { CacheService } from 'src/common/cache/cache.service';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
   private readonly SALT_ROUNDS = 10; // Cambiar a un valor más seguro en producción
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cacheService: CacheService,
+  ) {}
 
   async create(createUserDto: CreateUserDto): Promise<Omit<User, 'password'>> {
     const { email, password, employee_id, ...userData } = createUserDto;
@@ -200,6 +207,28 @@ export class UsersService {
 
     // El middleware de soft-delete se encargará de la lógica
     await this.prisma.user.delete({ where: { user_id } });
+
     return { message: `User with ID '${user_id}' deleted (soft delete).` };
+  }
+
+  async invalidateUserCacheById(uuid: string) {
+    const cacheKeyIndividual = CACHE_KEYS.USERS_BY_ID(uuid);
+    try {
+      const deleteResult = await this.cacheService.del(cacheKeyIndividual);
+      if (!deleteResult) {
+        this.logger.log(`Individual cache not found for User ID: ${uuid}`);
+        return;
+      }
+      this.logger.log(`Individual cache invalidated for User ID: ${uuid}`);
+    } catch (error) {
+      this.logger.error(
+        `Error invalidating individual cache for User ID ${uuid}: `,
+        error,
+      );
+    }
+  }
+
+  async invalidateUsersListCache() {
+    await this.cacheService.invalidateListCacheByPattern('users:list', 'User');
   }
 }
