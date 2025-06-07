@@ -12,6 +12,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   SerializeOptions,
   UseGuards,
   UseInterceptors,
@@ -23,6 +24,8 @@ import { UserResponseDto } from './dto/user.response.dto'; // Importa el DTO de 
 import { UserRole } from '@prisma/client';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
+import { FindAllUsersQueryParamsDto } from './dto/find-all-users-query-params.dto';
+import { FindAllUsersResponseDto } from './dto/find-all-users-response.dto';
 
 @Controller('users')
 @UseInterceptors(ClassSerializerInterceptor) // Aplica el interceptor para transformar respuestas
@@ -41,9 +44,23 @@ export class UsersController {
   @SerializeOptions({ type: UserResponseDto })
   @Get()
   @Roles(UserRole.ADMIN)
-  async findAll(): Promise<UserResponseDto[]> {
-    const users = await this.usersService.findAll();
-    return users.map((user) => new UserResponseDto(user));
+  async findAll(
+    @Query() paginationDto: FindAllUsersQueryParamsDto,
+  ): Promise<{ data: FindAllUsersResponseDto; message: string }> {
+    const { total, result, meta } =
+      await this.usersService.findAll(paginationDto);
+    const users: UserResponseDto[] = result.map(
+      (user) => new UserResponseDto(user),
+    );
+
+    return {
+      data: {
+        total,
+        result: users,
+        meta,
+      },
+      message: 'Users list retrieved successfully.',
+    };
   }
 
   @SerializeOptions({ type: UserResponseDto })

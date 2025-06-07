@@ -38,17 +38,9 @@ export const CACHE_KEYS = {
   ) =>
     `sales:list:page=${page}:limit=${limit}:query=${query || 'none'}:dateFrom=${dateFrom || 'none'}:dateTo=${dateTo || 'none'}:minTotal=${minTotal || 'none'}:maxTotal=${maxTotal || 'none'}:includeDeleted=${includeDeleted || 'none'}`,
   USERS_BY_ID: (id: string) => `users:item:${id}`,
-  USERS_LIST: (
-    page: number,
-    limit: number,
-    query?: string,
-    dateFrom?: string,
-    dateTo?: string,
-    minTotal?: number,
-    maxTotal?: number,
-    includeDeleted?: boolean,
-  ) =>
-    `users:list:page=${page}:limit=${limit}:query=${query || 'none'}:dateFrom=${dateFrom || 'none'}:dateTo=${dateTo || 'none'}:minTotal=${minTotal || 'none'}:maxTotal=${maxTotal || 'none'}:includeDeleted=${includeDeleted || 'none'}`,
+  USERS_BY_EMAIL: (email: string) => `users:item:${email}`,
+  USERS_LIST: (page: number, limit: number, query?: string) =>
+    `users:list:page=${page}:limit=${limit}:query=${query || 'none'}`,
   // Añade más claves según necesites
 };
 

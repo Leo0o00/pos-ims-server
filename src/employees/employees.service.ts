@@ -242,6 +242,8 @@ export class EmployeesService {
     }
   }
 
+  // async findSalesByEmployeeId(uuid: string) {}
+
   async update(uuid: string, updateEmployeeDto: UpdateEmployeeDto) {
     try {
       const existingEmployee = await this.prisma.employees.findFirst({

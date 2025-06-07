@@ -12,8 +12,22 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Prisma, User } from '@prisma/client';
-import { CACHE_KEYS } from '../common/cache/constants/cache.constants';
+import {
+  CACHE_KEYS,
+  CACHE_TTL,
+} from '../common/cache/constants/cache.constants';
 import { CacheService } from 'src/common/cache/cache.service';
+import { FindAllUsersQueryParamsDto } from './dto/find-all-users-query-params.dto';
+import { MetaType } from '../common/types/meta.type';
+import { PaginationService } from '../common/pagination/pagination.service';
+
+type UsersList = User[];
+
+type FindAllUsersQuery = {
+  total: number;
+  result: Omit<User, 'password'>[];
+  meta: MetaType;
+};
 
 @Injectable()
 export class UsersService {
@@ -22,6 +36,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cacheService: CacheService,
+    private readonly paginationService: PaginationService,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<Omit<User, 'password'>> {
@@ -67,6 +82,10 @@ export class UsersService {
       });
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { password: _, ...result } = user; // Excluir contraseña del resultado
+
+      // Invalidación de caché después de crear
+      await this.invalidateUsersListCache();
+
       return result;
     } catch (error) {
       // Manejar otros errores de Prisma, ej. P2002 para campos únicos si no es email
@@ -82,17 +101,95 @@ export class UsersService {
     }
   }
 
-  async findAll(): Promise<Omit<User, 'password'>[]> {
+  async findAll(
+    queryParams: FindAllUsersQueryParamsDto,
+  ): Promise<FindAllUsersQuery> {
+    interface Filters {
+      contains: string;
+      mode: string;
+    }
+
+    const { query, limit = 10, page = 1 } = queryParams;
+
+    //Construir la clave de caché
+    const cacheKey = CACHE_KEYS.USERS_LIST(page, limit, query);
+    //Intentar obtener de la caché
+    try {
+      const cachedUsers =
+        await this.cacheService.get<FindAllUsersQuery>(cacheKey);
+      if (cachedUsers) {
+        // const {total, result, meta} = cachedUsers;
+        this.logger.log(
+          `Returning paged Users list from cache for key: ${cacheKey}`,
+        );
+        return cachedUsers;
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error accessing the cache for the key: ${cacheKey}: `,
+        error,
+      );
+    }
+
+    let filters: Array<Record<string, Filters>> = [];
+
+    if (query) {
+      filters = [
+        { email: { contains: query, mode: 'insensitive' } },
+        { first_name: { contains: query, mode: 'insensitive' } },
+        { last_name: { contains: query, mode: 'insensitive' } },
+      ];
+    }
+    const where: Prisma.UserWhereInput = {
+      AND: [query ? { OR: filters } : {}],
+    };
+
     const users = await this.prisma.user.findMany({
+      where,
       include: {
         employee: { select: { first_name: true, last_name: true, CID: true } },
       },
     });
+
+    console.log('USERS LIST: ', users);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    return users.map(({ password, ...user }) => user);
+    const usersWithoutPasswordList = users.map(({ password, ...user }) => user);
+
+    /* total global con filtros */
+    const total = await this.prisma.user.count({ where });
+    const meta: MetaType = this.paginationService.getPaginationMeta(
+      page,
+      limit,
+      total,
+    );
+
+    //Guardar en caché antes de retornar
+    await this.cacheService.setWithLogMessage<FindAllUsersQuery>(
+      cacheKey,
+      { total, result: usersWithoutPasswordList, meta },
+      CACHE_TTL.EIGHT_HOURS,
+      'Users List',
+    );
+
+    return { total, result: usersWithoutPasswordList, meta };
   }
 
   async findOne(user_id: string): Promise<Omit<User, 'password'> | null> {
+    const cacheKey = CACHE_KEYS.USERS_BY_ID(user_id);
+
+    try {
+      const cachedUser = await this.cacheService.get<User>(cacheKey);
+      if (cachedUser) {
+        this.logger.log(`Returning user from cache for user ID: ${user_id}`);
+        return cachedUser;
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error accessing cache for user ID ${user_id}: `,
+        error,
+      );
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { user_id },
       include: { employee: true },
@@ -100,6 +197,16 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException(`User with ID '${user_id}' not found.`);
     }
+
+    if (user) {
+      await this.cacheService.setWithLogMessage(
+        cacheKey,
+        user,
+        CACHE_TTL.EIGHT_HOURS,
+        'User details',
+      );
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password, ...result } = user;
     return result;
@@ -108,10 +215,37 @@ export class UsersService {
   async findByEmailForAuth(email: string): Promise<User | null> {
     // Este método será útil para el módulo de autenticación
     // No excluye la contraseña porque el servicio de autenticación la necesitará para comparar
-    return this.prisma.user.findUnique({
+
+    const cacheKey = CACHE_KEYS.USERS_BY_EMAIL(email);
+
+    try {
+      const cachedUser = await this.cacheService.get<User>(cacheKey);
+      if (cachedUser) {
+        this.logger.log(`Returning user from cache for user Email: ${email}`);
+        return cachedUser;
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error accessing cache for user Email ${email}: `,
+        error,
+      );
+    }
+
+    const userDetails = await this.prisma.user.findUnique({
       where: { email, /*deleted_at: null,*/ is_active: true }, // El middleware de soft-delete ya filtra por deleted_at: null
       // Considera is_active para login
     });
+
+    if (userDetails) {
+      await this.cacheService.setWithLogMessage(
+        cacheKey,
+        userDetails,
+        CACHE_TTL.EIGHT_HOURS,
+        'User details',
+      );
+    }
+
+    return userDetails;
   }
 
   async update(
@@ -178,6 +312,12 @@ export class UsersService {
       });
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { password: _, ...result } = updatedUser;
+
+      // Invalidación de caché después de actualizar
+      await this.invalidateUserCacheById(user_id);
+      await this.invalidateUserCacheByEmail(updatedUser.email);
+      await this.invalidateUsersListCache();
+
       return result;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -206,7 +346,12 @@ export class UsersService {
     }
 
     // El middleware de soft-delete se encargará de la lógica
-    await this.prisma.user.delete({ where: { user_id } });
+    const deleteResult = await this.prisma.user.delete({ where: { user_id } });
+
+    // Invalidación de caché después de eliminar
+    await this.invalidateUserCacheById(user_id);
+    await this.invalidateUserCacheByEmail(deleteResult.email);
+    await this.invalidateUsersListCache();
 
     return { message: `User with ID '${user_id}' deleted (soft delete).` };
   }
@@ -223,6 +368,23 @@ export class UsersService {
     } catch (error) {
       this.logger.error(
         `Error invalidating individual cache for User ID ${uuid}: `,
+        error,
+      );
+    }
+  }
+
+  async invalidateUserCacheByEmail(email: string) {
+    const cacheKeyIndividual = CACHE_KEYS.USERS_BY_EMAIL(email);
+    try {
+      const deleteResult = await this.cacheService.del(cacheKeyIndividual);
+      if (!deleteResult) {
+        this.logger.log(`Individual cache not found for User Email: ${email}`);
+        return;
+      }
+      this.logger.log(`Individual cache invalidated for User Email: ${email}`);
+    } catch (error) {
+      this.logger.error(
+        `Error invalidating individual cache for User Email ${email}: `,
         error,
       );
     }

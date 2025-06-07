@@ -97,6 +97,25 @@ export class EmployeesController {
     };
   }
 
+  // TODO: Implementar un metodo que devuelva las ventas por id de empleado
+  // @Get(':uuid/sales')
+  // @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  // async findSalesByEmployeeId(
+  //   @Req() req,
+  //   @Param(
+  //     'uuid',
+  //     new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.BAD_REQUEST }),
+  //   )
+  //   uuid: string,
+  // ) {
+  //   console.log(req);
+  //   const result = await this.employeesService.findSalesByEmployeeId(uuid);
+  //   return {
+  //     data: result,
+  //     message: 'Employee details retrieved successfully.',
+  //   };
+  // }
+
   @Patch(':uuid')
   @Roles(UserRole.ADMIN)
   async update(

@@ -13,7 +13,6 @@ import { S3Service } from 'src/common/s3/s3.service';
 import { ProductsService } from 'src/products/products.service';
 import { RCreateProductDto } from 'src/products/dto/r-create-product.dto';
 import { QueryParamsDto } from 'src/common/dto/query-params.dto';
-import { PurchasesResult } from './types/purchase-result.type';
 import { PaginationService } from 'src/common/pagination/pagination.service';
 import { ProductsPurchased } from './types/products-purchased.type';
 import { InventoryHelpers } from 'src/common/helpers/inventory.helpers';
@@ -360,9 +359,8 @@ export class PurchasesService {
         take: limit,
       });
 
-      // TODO: Refactorizar este metodo a partir de aqui procesando las compras como en el metodo findAll del modulo Sales
       purchases.forEach((purchase) => {
-        const o: PurchasesResult = {
+        const o: PurchasesQueryResult = {
           purchase_id: '',
           purchase_date: '',
           total_products_purchased: 0,

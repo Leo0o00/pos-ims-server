@@ -23,9 +23,30 @@ import {
 import { CacheService } from 'src/common/cache/cache.service';
 import { MetaType } from '../common/types/meta.type';
 
+type SalesQueryResult = {
+  sales_id: string;
+  sales_date: string;
+  sales_related_employee: string;
+  total_products_sold: number;
+  total_stock_removed: number;
+  total_sale: number;
+  created_at: string;
+  last_update: string;
+  delete_at: string | null;
+};
+
+type SalesList = SalesQueryResult[];
+
+type FindAllSalesResult = {
+  result: SalesList;
+  total: number;
+  meta: MetaType;
+};
+
 type SaleDetails = {
   sale_id: string;
   sale_date: Date;
+  sales_related_employee: string;
   products_sold: ProductsSold[];
   created_at: Date;
   last_update: Date;
@@ -122,8 +143,10 @@ export class SalesService {
     );
     //Intentar obtener de la caché
     try {
-      const cachedSales = await this.cacheService.get(cacheKey);
+      const cachedSales =
+        await this.cacheService.get<FindAllSalesResult>(cacheKey);
       if (cachedSales) {
+        // const {total, result, meta} = cachedSales;
         this.logger.log(
           `Returning paged Sales list from cache for key: ${cacheKey}`,
         );
@@ -148,18 +171,62 @@ export class SalesService {
       ],
     };
 
-    // TODO: Sanitizar esta consulta para que retorne la data en una estructura mas coherente
-    /* consulta principal */
-    const result = await this.prisma.sales.findMany({
-      where,
-      include: {
-        products_sales: true,
-        _count: { select: { products_sales: true } },
-      },
-      orderBy: { created_at: 'desc' },
-      skip: (page - 1) * limit,
-      take: limit,
-    }); // usa findMany + include _count para eficiencia
+    const result: SalesList = [];
+
+    try {
+      /* consulta principal */
+      const queryResult = await this.prisma.sales.findMany({
+        where,
+        include: {
+          products_sales: true,
+          employee: true,
+          _count: { select: { products_sales: true } },
+        },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }); // usa findMany + include _count para eficiencia
+
+      // console.log('RESULT: ', queryResult);
+
+      queryResult.forEach((sale) => {
+        const o: SalesQueryResult = {
+          sales_id: '',
+          sales_date: '',
+          sales_related_employee: '',
+          total_products_sold: 0,
+          total_stock_removed: 0,
+          total_sale: 0,
+          created_at: '',
+          last_update: '',
+          delete_at: null,
+        };
+        let total_sale: number = 0,
+          total_stock_removed: number = 0;
+
+        o['sales_id'] = sale.sales_id;
+        o['sales_date'] = sale.date.toISOString();
+        o['sales_related_employee'] = sale.employee.employee_id;
+        o['total_products_sold'] = sale._count.products_sales;
+
+        sale.products_sales.forEach((sale_element) => {
+          total_stock_removed += sale_element.quantity;
+          total_sale += Number(sale_element.unit_price) * sale_element.quantity;
+        });
+        o['total_stock_removed'] = total_stock_removed;
+        o['total_sale'] = total_sale;
+        o['created_at'] = sale.created_at.toISOString();
+        o['last_update'] = sale.last_update.toISOString();
+        o['delete_at'] = sale.deleted_at ? sale.deleted_at.toISOString() : null;
+
+        result.push(o);
+      });
+    } catch (error) {
+      console.error('ERROR AL TRAER LISTA DE LOS VENTAS DE BD: ', error);
+      throw new InternalServerErrorException(
+        'Unespected error. Check the logs',
+      );
+    }
 
     /* total global con filtros */
     const total = await this.prisma.sales.count({ where });
@@ -170,7 +237,7 @@ export class SalesService {
     );
 
     //Guardar en caché antes de retornar
-    await this.cacheService.setWithLogMessage(
+    await this.cacheService.setWithLogMessage<FindAllSalesResult>(
       cacheKey,
       { total, result, meta },
       CACHE_TTL.EIGHT_HOURS,
@@ -193,7 +260,7 @@ export class SalesService {
     try {
       const cachedSale = await this.cacheService.get<SaleDetails>(cacheKey);
       if (cachedSale) {
-        this.logger.log(`Returning purchase from cache for sale ID: ${id}`);
+        this.logger.log(`Returning sale from cache for sale ID: ${id}`);
         return cachedSale;
       }
     } catch (error) {
@@ -206,7 +273,7 @@ export class SalesService {
       const sale = await this.prisma.sales.findFirst({
         where: { sales_id: id },
         include: {
-          employee: { select: { first_name: true, last_name: true } },
+          employee: { select: { employee_id: true } },
           products_sales: {
             include: {
               product: {
@@ -279,6 +346,7 @@ export class SalesService {
       const saleDetails: SaleDetails = {
         sale_id: sale?.sales_id,
         sale_date: sale?.date,
+        sales_related_employee: sale?.employee.employee_id,
         products_sold,
         created_at: sale?.created_at,
         last_update: sale?.last_update,
@@ -475,7 +543,6 @@ export class SalesService {
     }
   }
 
-  //TODO: Asociar este metodo con el rol de administrador
   //TODO: Implementar una extension de prisma para que solo los usuarios con este rol puedan restaurar un registro de venta eliminado
   /** -------------------- RESTORE -------------------- */
   /**
